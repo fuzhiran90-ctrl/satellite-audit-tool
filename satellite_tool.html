@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>光伏核查 — 卫星图交互定位工具</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;height:100vh;display:flex;flex-direction:column}
+
+/* ====== Search Bar ====== */
+.search-bar{background:#161b22;padding:10px 16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid #30363d}
+.search-bar .brand{color:#58a6ff;font-size:1em;font-weight:bold;white-space:nowrap;margin-right:8px}
+.search-input-wrap{position:relative;flex:1;min-width:280px;max-width:600px}
+.search-input-wrap input{width:100%;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:8px 12px;border-radius:6px;font-size:0.9em;outline:none}
+.search-input-wrap input:focus{border-color:#58a6ff}
+.search-input-wrap input::placeholder{color:#484f58}
+#searchResults{position:absolute;top:100%;left:0;right:0;background:#161b22;border:1px solid #30363d;border-top:none;border-radius:0 0 6px 6px;z-index:9999;max-height:300px;overflow-y:auto;display:none}
+#searchResults .item{padding:10px 12px;cursor:pointer;border-bottom:1px solid #21262d;color:#c9d1d9;font-size:0.83em}
+#searchResults .item:hover{background:#1f2a3a}
+#searchResults .item .name{color:#58a6ff}
+#searchResults .item .addr{color:#8b949e;font-size:0.85em;margin-top:2px}
+#searchResults .item .coords{color:#484f58;font-size:0.8em}
+#searchResults .empty{color:#8b949e;text-align:center;padding:20px;font-size:0.85em}
+.search-bar .btn{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:0.8em;white-space:nowrap}
+.search-bar .btn:hover{background:#30363d}
+.search-bar .btn.accent{background:#238636;border-color:#238636;color:#fff}
+.search-bar .sep{width:1px;height:22px;background:#30363d;margin:0 4px}
+.search-bar select{background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:7px 8px;border-radius:6px;font-size:0.8em}
+
+/* ====== Main Layout ====== */
+.main{display:flex;flex:1;overflow:hidden}
+#mapContainer{flex:1;position:relative}
+#map{width:100%;height:100%}
+
+/* ====== Coordinate overlay on map ====== */
+.map-coord-display{position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,0.7);color:#7ee787;padding:4px 10px;border-radius:4px;font-family:monospace;font-size:0.72em;z-index:999;pointer-events:none}
+
+/* ====== Side Panel ====== */
+.panel{width:340px;background:#161b22;border-left:1px solid #30363d;overflow-y:auto;font-size:0.82em}
+.panel-section{padding:12px 14px;border-bottom:1px solid #30363d}
+.panel-section h3{color:#d2a8ff;font-size:0.9em;margin-bottom:8px}
+.panel-section label{display:block;color:#8b949e;font-size:0.75em;margin:5px 0 2px}
+.panel-section input,.panel-section textarea,.panel-section select{width:100%;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:5px 8px;border-radius:4px;font-family:monospace;font-size:0.85em}
+.panel-section input:focus,.panel-section textarea:focus{border-color:#58a6ff;outline:none}
+.row{display:flex;gap:6px}
+.row input{flex:1}
+.coord-box{background:#0d1117;padding:8px;border-radius:4px;font-family:monospace;font-size:0.78em;line-height:1.7;color:#7ee787;word-break:break-all}
+.coord-box .dim{color:#8b949e}
+
+/* ====== Buttons ====== */
+.btn-full{width:100%;padding:8px;margin:2px 0;border-radius:6px;cursor:pointer;font-size:0.85em;border:1px solid #30363d;text-align:center}
+.btn-full.accent{background:#238636;border-color:#238636;color:#fff}
+.btn-full.accent:hover{background:#2ea043}
+.btn-full.normal{background:#21262d;color:#c9d1d9}
+.btn-full.normal:hover{background:#30363d}
+.btn-full.warn{background:#9a6700;border-color:#9a6700;color:#fff}
+
+/* ====== Historical note ====== */
+.historical-note{background:#1a1a0e;border:1px solid #d2991d;padding:10px 12px;margin-top:8px;border-radius:4px;font-size:0.78em;line-height:1.5;color:#e3b341}
+.historical-note strong{color:#ffcc00}
+
+/* ====== Screenshot preview ====== */
+#screenshotPreview{margin-top:8px;display:none}
+#screenshotPreview img{max-width:100%;border-radius:4px;border:1px solid #30363d}
+</style>
+</head>
+<body>
+
+<!-- ======== SEARCH BAR ======== -->
+<div class="search-bar">
+    <span class="brand">光伏核查</span>
+    <div class="search-input-wrap">
+        <input id="searchInput" type="text" placeholder="输入地址搜索... 例如: 张家港市锦丰镇、苏州工业园区、某某光伏电站"
+               oninput="onSearchInput()" onkeydown="onSearchKey(event)" autocomplete="off">
+        <div id="searchResults"></div>
+    </div>
+    <button class="btn accent" onclick="doSearch()">🔍 搜索</button>
+    <span class="sep"></span>
+    <select id="geocoderSelect" onchange="onGeocoderChange()">
+        <option value="photon">Photon (免费)</option>
+        <option value="nominatim">Nominatim (免费)</option>
+        <option value="amap_key">高德 (需Key)</option>
+    </select>
+    <span class="sep"></span>
+    <button class="btn" onclick="goToManual()">📍 坐标定位</button>
+</div>
+
+<!-- ======== MAIN CONTENT ======== -->
+<div class="main">
+    <div id="mapContainer">
+        <div id="map"></div>
+        <div class="map-coord-display" id="mapCoordDisplay">120.583568, 31.986328 (WGS-84) | z18</div>
+    </div>
+
+    <!-- ======== SIDE PANEL ======== -->
+    <div class="panel">
+        <!-- Manual coordinate input -->
+        <div class="panel-section" id="manualPanel" style="display:none">
+            <h3>📍 手动坐标定位</h3>
+            <label>WGS-84 经度</label><input id="manualLng" placeholder="120.583568">
+            <label>WGS-84 纬度</label><input id="manualLat" placeholder="31.986328">
+            <label>百度 BD-09 经度</label><input id="manualBdLng" placeholder="自动换算">
+            <label>百度 BD-09 纬度</label><input id="manualBdLat" placeholder="自动换算">
+            <button class="btn-full accent" onclick="goManual()">定位</button>
+            <button class="btn-full normal" onclick="toggleManual()" style="margin-top:2px">收起</button>
+        </div>
+
+        <!-- Current position -->
+        <div class="panel-section">
+            <h3>📌 当前位置</h3>
+            <div class="coord-box" id="currentPos">
+                搜索地址或点击地图定位...
+            </div>
+            <button class="btn-full normal" style="margin-top:6px" onclick="copyCurrentWGS()">📋 复制 WGS-84 坐标</button>
+        </div>
+
+        <!-- Selection area -->
+        <div class="panel-section">
+            <h3>📐 框选区域 (点击 ▢ 按钮)</h3>
+            <div class="coord-box" id="areaInfo">未框选 — 点击左侧地图工具栏 ▢ 按钮开始框选</div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+                <button class="btn-full normal" style="flex:1" onclick="clearArea()">清除框选</button>
+                <button class="btn-full accent" style="flex:1" onclick="exportArea()">导出范围</button>
+            </div>
+        </div>
+
+        <!-- View controls -->
+        <div class="panel-section">
+            <h3>🔧 视图控制</h3>
+            <div style="display:flex;gap:4px;align-items:center;margin-bottom:6px">
+                <button class="btn-full normal" style="flex:1" onclick="mapZoom(-1)">🔍-</button>
+                <span id="zoomLabel" style="color:#c9d1d9;font-size:0.9em;min-width:30px;text-align:center">18</span>
+                <button class="btn-full normal" style="flex:1" onclick="mapZoom(1)">🔍+</button>
+            </div>
+            <button class="btn-full normal" onclick="toggleCircle()" id="circleBtn">⭕ 100m圈 (已显示)</button>
+            <button class="btn-full normal" onclick="toggleMeasure()" id="measureBtn">📏 测距 (未激活)</button>
+            <button class="btn-full normal" onclick="resetView()">🔄 重置视图</button>
+        </div>
+
+        <!-- Basemap -->
+        <div class="panel-section">
+            <h3>🛰️ 底图</h3>
+            <select onchange="setBasemap(this.value)" style="width:100%">
+                <option value="amap" selected>高德卫星图 (推荐)</option>
+                <option value="amap_road">高德地图 (道路)</option>
+                <option value="esri">Esri 卫星图</option>
+            </select>
+        </div>
+
+        <!-- Screenshot -->
+        <div class="panel-section">
+            <h3>📸 截图</h3>
+            <button class="btn-full accent" onclick="capture()">截取当前地图视图</button>
+            <button class="btn-full normal" onclick="capture()" style="margin-top:4px">含标注截图</button>
+            <div id="screenshotPreview"></div>
+        </div>
+
+        <!-- Historical note -->
+        <div class="panel-section">
+            <h3>⚠️ 历史影像</h3>
+            <div class="historical-note">
+                <strong>公开图源仅提供当前影像。</strong><br>
+                430/531核查需2025年3-6月存档数据：<br><br>
+                <strong>① 长光卫星(吉林一号)</strong><br>
+                0.3-0.5m | 日重访 | 2015起存档<br>
+                <strong>② 世纪空间(北京二号/三号)</strong><br>
+                0.5m | 每日 | 历史存档检索<br>
+                <strong>③ 资源卫星中心(高分多模)</strong><br>
+                0.3m | 需资质申请<br><br>
+                📞 建议联系长光卫星询价
+            </div>
+        </div>
+
+        <!-- Amap key input (hidden by default) -->
+        <div class="panel-section" id="amapKeySection" style="display:none">
+            <h3>🔑 高德地图 API Key</h3>
+            <p style="color:#8b949e;font-size:0.75em;margin-bottom:4px">免费申请: console.amap.com</p>
+            <input id="amapKey" type="text" placeholder="输入高德 Web服务 Key">
+            <button class="btn-full accent" style="margin-top:4px" onclick="saveAmapKey()">保存 Key</button>
+        </div>
+    </div>
+</div>
+
+<!-- Leaflet Draw -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+
+<script>
+// ===================== COORDINATE TRANSFORMS =====================
+const PI=Math.PI, AX=6378245, EE=0.00669342162296594323;
+function _tLat(x,y){let r=-100+2*x+3*y+0.2*y*y+0.1*x*y+0.2*Math.sqrt(Math.abs(x));r+=(20*Math.sin(6*x*PI)+20*Math.sin(2*x*PI))*2/3;r+=(20*Math.sin(y*PI)+40*Math.sin(y/3*PI))*2/3;r+=(160*Math.sin(y/12*PI)+320*Math.sin(y*PI/30))*2/3;return r}
+function _tLon(x,y){let r=300+x+2*y+0.1*x*x+0.1*x*y+0.1*Math.sqrt(Math.abs(x));r+=(20*Math.sin(6*x*PI)+20*Math.sin(2*x*PI))*2/3;r+=(20*Math.sin(x*PI)+40*Math.sin(x/3*PI))*2/3;r+=(150*Math.sin(x/12*PI)+300*Math.sin(x/30*PI))*2/3;return r}
+function wgs2gcj(lng,lat){const dLat=_tLat(lng-105,lat-35),dLon=_tLon(lng-105,lat-35);const r=lat/180*PI;const m=1-EE*Math.sin(r)*Math.sin(r);const s=Math.sqrt(m);return{lng:lng+(dLon*180)/(AX/s*Math.cos(r)*PI),lat:lat+(dLat*180)/((AX*(1-EE))/(m*s)*PI)}}
+function gcj2wgs(lng,lat){let w={lng,lat};for(let i=0;i<5;i++){const t=wgs2gcj(w.lng,w.lat);w.lng+=lng-t.lng;w.lat+=lat-t.lat}return w}
+function gcj2bd(lng,lat){const z=Math.sqrt(lng*lng+lat*lat)+0.00002*Math.sin(lat*PI*3000/180);const th=Math.atan2(lat,lng)+0.000003*Math.cos(lng*PI*3000/180);return{lng:z*Math.cos(th)+0.0065,lat:z*Math.sin(th)+0.006}}
+function bd2gcj(lng,lat){const x=lng-0.0065,y=lat-0.006;const z=Math.sqrt(x*x+y*y)-0.00002*Math.sin(y*PI*3000/180);const th=Math.atan2(y,x)-0.000003*Math.cos(x*PI*3000/180);return{lng:z*Math.cos(th),lat:z*Math.sin(th)}}
+function bd2wgs(lng,lat){return gcj2wgs(bd2gcj(lng,lat).lng, bd2gcj(lng,lat).lat)}
+
+// ===================== STATE =====================
+let currentWgs = { lng: 120.583568, lat: 31.986328 };
+let circle100m = null, circleShown = true;
+let measurePoints = [], measureLines = [], measuring = false;
+let searchTimer = null;
+let amapWebKey = '';
+
+// ===================== MAP =====================
+const amapSat = L.tileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', {
+    subdomains: ['1','2','3','4'], maxNativeZoom: 18, maxZoom: 20
+});
+const amapRoad = L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+    subdomains: ['1','2','3','4'], maxZoom: 18
+});
+const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19
+});
+
+const map = L.map('map', {
+    center: [wgs2gcj(currentWgs.lng, currentWgs.lat).lat, wgs2gcj(currentWgs.lng, currentWgs.lat).lng],
+    zoom: 18, layers: [amapSat], zoomControl: false
+});
+
+// Center marker
+const centerMarker = L.circleMarker([0,0], {radius:8,color:'#ff0000',fillColor:'#ff0000',fillOpacity:0.6,weight:2}).addTo(map);
+updateMarker();
+
+// Rectangle drawing
+const drawnItems = new L.FeatureGroup();
+map.addLayer(drawnItems);
+const drawControl = new L.Control.Draw({
+    draw: { polyline:false, polygon:false, circle:false, circlemarker:false, marker:false,
+        rectangle: { shapeOptions: { color:'#00ff88',weight:2,fillColor:'#00ff88',fillOpacity:0.1 } } },
+    edit: { featureGroup: drawnItems, edit: { selectedPathOptions: { color:'#ffa500',weight:3 } } }
+});
+map.addControl(drawControl);
+
+map.on(L.Draw.Event.CREATED, e => { drawnItems.clearLayers(); drawnItems.addLayer(e.layer); updateAreaInfo(e.layer); });
+map.on(L.Draw.Event.EDITED, e => { e.layers.eachLayer(l => updateAreaInfo(l)); });
+map.on(L.Draw.Event.DELETED, () => { document.getElementById('areaInfo').innerHTML = '未框选 — 点击左侧地图工具栏 ▢ 按钮开始框选'; });
+
+// Click to set center
+map.on('click', function(e) {
+    if (measuring) { addMeasurePoint(e.latlng); return; }
+    const gcj = e.latlng;
+    currentWgs = gcj2wgs(gcj.lng, gcj.lat);
+    updateMarker();
+    updatePosDisplay();
+});
+
+map.on('mousemove', function(e) {
+    const wgs = gcj2wgs(e.latlng.lng, e.latlng.lat);
+    document.getElementById('mapCoordDisplay').textContent =
+        wgs.lng.toFixed(6) + ', ' + wgs.lat.toFixed(6) + ' (WGS-84) | z' + map.getZoom();
+});
+map.on('zoomend', () => {
+    document.getElementById('zoomLabel').textContent = map.getZoom();
+    document.getElementById('mapCoordDisplay').textContent =
+        currentWgs.lng.toFixed(6) + ', ' + currentWgs.lat.toFixed(6) + ' (WGS-84) | z' + map.getZoom();
+});
+
+// ===================== MARKER & DISPLAY =====================
+function updateMarker() {
+    const gcj = wgs2gcj(currentWgs.lng, currentWgs.lat);
+    centerMarker.setLatLng([gcj.lat, gcj.lng]);
+    if (circle100m && circleShown) {
+        map.removeLayer(circle100m);
+        circle100m = L.circle([gcj.lat, gcj.lng], {radius:100,color:'#ff8800',weight:2,fill:false,dashArray:'8,4',opacity:0.7}).addTo(map);
+    }
+    if (!circle100m && circleShown) {
+        circle100m = L.circle([gcj.lat, gcj.lng], {radius:100,color:'#ff8800',weight:2,fill:false,dashArray:'8,4',opacity:0.7}).addTo(map);
+    }
+}
+
+function updatePosDisplay() {
+    const gcj = wgs2gcj(currentWgs.lng, currentWgs.lat);
+    const bd = gcj2bd(gcj.lng, gcj.lat);
+    document.getElementById('currentPos').innerHTML =
+        '<b>WGS-84:</b> ' + currentWgs.lng.toFixed(6) + ', ' + currentWgs.lat.toFixed(6) + '<br>' +
+        '<b>GCJ-02:</b> ' + gcj.lng.toFixed(6) + ', ' + gcj.lat.toFixed(6) + '<br>' +
+        '<b>BD-09:</b> ' + bd.lng.toFixed(6) + ', ' + bd.lat.toFixed(6) + '<br>' +
+        '<b>Zoom:</b> ' + map.getZoom() + ' | <b>精度:</b> ~' + (156543.03/Math.pow(2,map.getZoom())*Math.cos(currentWgs.lat*PI/180)).toFixed(3) + 'm/px';
+}
+
+function updateAreaInfo(layer) {
+    const b = layer.getBounds();
+    const sw = gcj2wgs(b.getSouthWest().lng, b.getSouthWest().lat);
+    const ne = gcj2wgs(b.getNorthEast().lng, b.getNorthEast().lat);
+    const mid = (sw.lat + ne.lat) / 2;
+    const wM = Math.abs(ne.lng - sw.lng) * 111320 * Math.cos(mid * PI / 180);
+    const hM = Math.abs(ne.lat - sw.lat) * 111320;
+    document.getElementById('areaInfo').innerHTML =
+        '<b>中心 WGS-84:</b> ' + ((sw.lng+ne.lng)/2).toFixed(6) + ', ' + ((sw.lat+ne.lat)/2).toFixed(6) + '<br>' +
+        '<b>范围 WGS-84:</b><br>[' + sw.lng.toFixed(6) + ', ' + ne.lng.toFixed(6) + ']<br>[' + sw.lat.toFixed(6) + ', ' + ne.lat.toFixed(6) + ']<br>' +
+        '<b>地面尺寸:</b> ' + wM.toFixed(0) + 'm × ' + hM.toFixed(0) + 'm<br>' +
+        '<b>面积:</b> ' + (wM*hM/10000).toFixed(3) + ' 公顷 (' + (wM*hM).toFixed(0) + ' ㎡)';
+}
+
+// ===================== ADDRESS SEARCH =====================
+function onSearchInput() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(doSearch, 400);
+}
+
+function onSearchKey(e) {
+    if (e.key === 'Enter') { clearTimeout(searchTimer); doSearch(); }
+    if (e.key === 'Escape') { document.getElementById('searchResults').style.display = 'none'; }
+}
+
+async function doSearch() {
+    const q = document.getElementById('searchInput').value.trim();
+    if (!q) { document.getElementById('searchResults').style.display = 'none'; return; }
+
+    const geocoder = document.getElementById('geocoderSelect').value;
+    const resultsDiv = document.getElementById('searchResults');
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = '<div class="empty">搜索中...</div>';
+
+    let results = [];
+
+    if (geocoder === 'photon') {
+        try {
+            const resp = await fetch('https://photon.komoot.io/api/?q=' + encodeURIComponent(q) + '&limit=8&lang=zh',
+                { headers: { 'User-Agent': 'PV-Inspector/1.0' } });
+            const data = await resp.json();
+            results = (data.features || []).map(f => ({
+                name: f.properties.name || f.properties.street || f.properties.city || '未知',
+                addr: [f.properties.county, f.properties.city, f.properties.state, f.properties.country].filter(Boolean).join(', '),
+                lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1],
+                source: 'Photon/OSM'
+            }));
+        } catch(e) { console.error('Photon error:', e); }
+    }
+
+    if (geocoder === 'nominatim') {
+        try {
+            const resp = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(q) + '&limit=8&accept-language=zh',
+                { headers: { 'User-Agent': 'PV-Inspector/1.0' } });
+            const data = await resp.json();
+            results = (data || []).map(f => ({
+                name: f.display_name.split(',')[0],
+                addr: f.display_name,
+                lng: parseFloat(f.lon), lat: parseFloat(f.lat),
+                source: 'Nominatim/OSM'
+            }));
+        } catch(e) { console.error('Nominatim error:', e); }
+    }
+
+    if (geocoder === 'amap_key') {
+        if (!amapWebKey) {
+            document.getElementById('amapKeySection').style.display = 'block';
+            resultsDiv.innerHTML = '<div class="empty">请先在右侧面板输入高德 API Key<br>(免费注册: console.amap.com → 应用管理 → 创建应用 → 添加 Web服务 Key)</div>';
+            return;
+        }
+        try {
+            const resp = await fetch('https://restapi.amap.com/v3/place/text?keywords=' + encodeURIComponent(q) + '&offset=10&key=' + amapWebKey);
+            const data = await resp.json();
+            if (data.status === '1' && data.pois) {
+                results = data.pois.map(p => {
+                    const gcj = { lng: parseFloat(p.location.split(',')[0]), lat: parseFloat(p.location.split(',')[1]) };
+                    const wgs = gcj2wgs(gcj.lng, gcj.lat);
+                    return { name: p.name, addr: p.pname + p.cityname + p.adname + p.address, lng: wgs.lng, lat: wgs.lat, source: '高德' };
+                });
+            } else {
+                resultsDiv.innerHTML = '<div class="empty">搜索失败: ' + (data.info || '未知错误') + '<br>请检查 API Key 是否正确</div>';
+                return;
+            }
+        } catch(e) {
+            resultsDiv.innerHTML = '<div class="empty">网络请求失败: ' + e.message + '</div>';
+            return;
+        }
+    }
+
+    if (results.length === 0) {
+        resultsDiv.innerHTML = '<div class="empty">未找到结果，请尝试: 简化关键词、使用完整地址、切换搜索引擎</div>';
+        return;
+    }
+
+    resultsDiv.innerHTML = results.map((r, i) =>
+        '<div class="item" onclick="selectResult(' + i + ')" onmouseenter="highlightResult(' + i + ')">' +
+        '<div class="name">' + r.name + ' <span style="color:#484f58;font-size:0.8em">[' + r.source + ']</span></div>' +
+        '<div class="addr">' + r.addr + '</div>' +
+        '<div class="coords">' + r.lng.toFixed(6) + ', ' + r.lat.toFixed(6) + ' (WGS-84)</div>' +
+        '</div>'
+    ).join('');
+
+    window._searchResults = results;
+}
+
+let _highlightMarker = null;
+function highlightResult(i) {
+    const r = window._searchResults[i];
+    if (!r) return;
+    if (_highlightMarker) map.removeLayer(_highlightMarker);
+    const gcj = wgs2gcj(r.lng, r.lat);
+    _highlightMarker = L.circleMarker([gcj.lat, gcj.lng], {radius:10,color:'#ff0',fillColor:'#ff0',fillOpacity:0.3,weight:2}).addTo(map);
+}
+
+function selectResult(i) {
+    const r = window._searchResults[i];
+    if (!r) return;
+    currentWgs = { lng: r.lng, lat: r.lat };
+    const gcj = wgs2gcj(r.lng, r.lat);
+    map.setView([gcj.lat, gcj.lng], 18);
+    updateMarker();
+    updatePosDisplay();
+    document.getElementById('searchResults').style.display = 'none';
+    document.getElementById('searchInput').value = r.name + ' - ' + r.addr;
+    if (_highlightMarker) { map.removeLayer(_highlightMarker); _highlightMarker = null; }
+}
+
+// Click outside to close search results
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.search-input-wrap')) {
+        document.getElementById('searchResults').style.display = 'none';
+    }
+});
+
+// ===================== MANUAL COORDINATE INPUT =====================
+function toggleManual() {
+    const panel = document.getElementById('manualPanel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+function goToManual() {
+    document.getElementById('manualPanel').style.display = 'block';
+    document.getElementById('manualLng').value = currentWgs.lng.toFixed(6);
+    document.getElementById('manualLat').value = currentWgs.lat.toFixed(6);
+    const bd = gcj2bd(wgs2gcj(currentWgs.lng, currentWgs.lat).lng, wgs2gcj(currentWgs.lng, currentWgs.lat).lat);
+    document.getElementById('manualBdLng').value = bd.lng.toFixed(6);
+    document.getElementById('manualBdLat').value = bd.lat.toFixed(6);
+}
+
+// Auto-convert BD-09 input
+document.getElementById('manualBdLng').addEventListener('input', function() {
+    const bdLng = parseFloat(this.value);
+    const bdLat = parseFloat(document.getElementById('manualBdLat').value);
+    if (!isNaN(bdLng) && !isNaN(bdLat)) {
+        const wgs = bd2wgs(bdLng, bdLat);
+        document.getElementById('manualLng').value = wgs.lng.toFixed(6);
+        document.getElementById('manualLat').value = wgs.lat.toFixed(6);
+    }
+});
+document.getElementById('manualBdLat').addEventListener('input', function() {
+    const bdLng = parseFloat(document.getElementById('manualBdLng').value);
+    const bdLat = parseFloat(this.value);
+    if (!isNaN(bdLng) && !isNaN(bdLat)) {
+        const wgs = bd2wgs(bdLng, bdLat);
+        document.getElementById('manualLng').value = wgs.lng.toFixed(6);
+        document.getElementById('manualLat').value = wgs.lat.toFixed(6);
+    }
+});
+
+function goManual() {
+    const lng = parseFloat(document.getElementById('manualLng').value);
+    const lat = parseFloat(document.getElementById('manualLat').value);
+    if (isNaN(lng) || isNaN(lat)) { alert('请输入有效坐标'); return; }
+    currentWgs = { lng, lat };
+    const gcj = wgs2gcj(lng, lat);
+    map.setView([gcj.lat, gcj.lng], 18);
+    updateMarker();
+    updatePosDisplay();
+}
+
+// ===================== MAP CONTROLS =====================
+function mapZoom(d) { map.setZoom(Math.max(15, Math.min(20, map.getZoom() + d))); }
+function resetView() {
+    currentWgs = { lng: 120.583568, lat: 31.986328 };
+    const gcj = wgs2gcj(currentWgs.lng, currentWgs.lat);
+    map.setView([gcj.lat, gcj.lng], 18);
+    updateMarker(); updatePosDisplay();
+}
+function toggleCircle() {
+    circleShown = !circleShown;
+    if (circleShown) {
+        const gcj = wgs2gcj(currentWgs.lng, currentWgs.lat);
+        circle100m = L.circle([gcj.lat, gcj.lng], {radius:100,color:'#ff8800',weight:2,fill:false,dashArray:'8,4',opacity:0.7}).addTo(map);
+    } else {
+        if (circle100m) { map.removeLayer(circle100m); circle100m = null; }
+    }
+    document.getElementById('circleBtn').textContent = circleShown ? '⭕ 100m圈 (已显示)' : '⭕ 100m圈 (已隐藏)';
+}
+function toggleMeasure() {
+    measuring = !measuring;
+    map.getContainer().style.cursor = measuring ? 'crosshair' : '';
+    document.getElementById('measureBtn').textContent = measuring ? '📏 测距 (已激活)' : '📏 测距 (未激活)';
+    if (!measuring) { clearMeasure(); }
+}
+function addMeasurePoint(latlng) {
+    const pt = L.circleMarker(latlng, {radius:4,color:'#ff0',fillColor:'#ff0',fillOpacity:0.8}).addTo(map);
+    measurePoints.push(pt);
+    if (measurePoints.length >= 2) {
+        const p1 = measurePoints[measurePoints.length-2].getLatLng();
+        const p2 = measurePoints[measurePoints.length-1].getLatLng();
+        const d = Math.round(p1.distanceTo(p2));
+        const line = L.polyline([p1, p2], {color:'#ff0',weight:2,dashArray:'4,4'}).addTo(map);
+        line.bindTooltip(d + 'm', {permanent:true,direction:'center'}).openTooltip();
+        measureLines.push(line);
+    }
+}
+function clearMeasure() {
+    measurePoints.forEach(p => map.removeLayer(p));
+    measureLines.forEach(l => map.removeLayer(l));
+    measurePoints = []; measureLines = [];
+}
+function setBasemap(type) {
+    [amapSat, amapRoad, esriSat].forEach(l => map.removeLayer(l));
+    if (type === 'amap_road') map.addLayer(amapRoad);
+    else if (type === 'esri') map.addLayer(esriSat);
+    else map.addLayer(amapSat);
+}
+function clearArea() { drawnItems.clearLayers(); document.getElementById('areaInfo').innerHTML = '未框选 — 点击左侧地图工具栏 ▢ 按钮开始框选'; }
+function exportArea() {
+    if (drawnItems.getLayers().length === 0) { alert('请先框选区域'); return; }
+    const b = drawnItems.getLayers()[0].getBounds();
+    const sw = gcj2wgs(b.getSouthWest().lng, b.getSouthWest().lat);
+    const ne = gcj2wgs(b.getNorthEast().lng, b.getNorthEast().lat);
+    const geojson = { type:'Feature', properties:{center:[(sw.lng+ne.lng)/2,(sw.lat+ne.lat)/2]},
+        geometry:{type:'Polygon',coordinates:[[[sw.lng,sw.lat],[ne.lng,sw.lat],[ne.lng,ne.lat],[sw.lng,ne.lat],[sw.lng,sw.lat]]]} };
+    const blob = new Blob([JSON.stringify(geojson,null,2)],{type:'application/json'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'area_' + new Date().toISOString().slice(0,10) + '.geojson'; a.click();
+}
+function copyCurrentWGS() {
+    const text = currentWgs.lng.toFixed(6) + ', ' + currentWgs.lat.toFixed(6);
+    navigator.clipboard.writeText(text).then(() => alert('已复制: ' + text));
+}
+
+// ===================== AMAP KEY =====================
+function onGeocoderChange() {
+    const v = document.getElementById('geocoderSelect').value;
+    document.getElementById('amapKeySection').style.display = v === 'amap_key' ? 'block' : 'none';
+}
+function saveAmapKey() {
+    amapWebKey = document.getElementById('amapKey').value.trim();
+    if (amapWebKey) { alert('Key 已保存 (仅本次会话有效)'); doSearch(); }
+}
+
+// ===================== SCREENSHOT =====================
+async function capture() {
+    try {
+        const canvas = await html2canvas(document.getElementById('mapContainer'), {useCORS:true,allowTaint:true,backgroundColor:'#0d1117'});
+        const dataUrl = canvas.toDataURL('image/png');
+        const preview = document.getElementById('screenshotPreview');
+        preview.style.display = 'block';
+        preview.innerHTML = '<p style="color:#8b949e;font-size:0.75em;margin-bottom:4px">截图 ' + canvas.width + 'x' + canvas.height + 'px</p><img src="' + dataUrl + '" />';
+        const a = document.createElement('a'); a.href = dataUrl;
+        a.download = 'satellite_' + currentWgs.lng.toFixed(4) + '_' + currentWgs.lat.toFixed(4) + '_' + new Date().toISOString().slice(0,10) + '.png';
+        a.click();
+    } catch(e) { alert('截图失败: ' + e.message + '\n可尝试浏览器自带截图 (Ctrl+Shift+S)'); }
+}
+
+// ===================== INIT =====================
+updatePosDisplay();
+circle100m = L.circle([wgs2gcj(currentWgs.lng, currentWgs.lat).lat, wgs2gcj(currentWgs.lng, currentWgs.lat).lng],
+    {radius:100,color:'#ff8800',weight:2,fill:false,dashArray:'8,4',opacity:0.7}).addTo(map);
+</script>
+</body>
+</html>

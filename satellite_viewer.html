@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>卫星地图 - 120.59°E, 31.99°N (江苏) - 光伏核查</title>
+<style>
+  body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
+  h1 { color: #00ff88; font-size: 1.5em; margin-bottom: 0; }
+  .subtitle { color: #888; font-size: 0.9em; margin-top: 4px; }
+  .location { background: #16213e; border-left: 3px solid #00ff88; padding: 12px 16px; margin: 16px 0; border-radius: 4px; }
+  .location strong { color: #00ff88; }
+  .image-card { background: #16213e; padding: 16px; margin: 20px 0; border-radius: 8px; }
+  .image-card h3 { margin: 0 0 4px 0; color: #ffd700; }
+  .image-card p { margin: 4px 0; color: #aaa; font-size: 0.85em; }
+  .legend { background: #16213e; padding: 12px 16px; margin: 16px 0; border-radius: 4px; font-size: 0.9em; }
+  .legend span { display: inline-block; width: 40px; height: 3px; margin: 0 6px; vertical-align: middle; }
+  .red-line { background: #ff0000; } .green-line { background: #00ff88; }
+  img { display: block; margin-top: 10px; cursor: zoom-in; }
+  .note { background: #2a1a0e; border: 1px solid #ff8800; padding: 12px; margin: 20px 0; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<h1>卫星地图核查视图</h1>
+<p class="subtitle">坐标: 120.59°E, 31.99°N — 江苏省苏州市张家港市附近</p>
+<div class="location">
+    📍 <strong>目标坐标:</strong> 120.590000°E, 31.990000°N<br>
+    🗺️ <strong>数据源:</strong> Esri World Imagery (通过 ArcGIS REST API)<br>
+    📐 <strong>分辨率:</strong> z=18 约 0.51m/px (满足亚米级要求)<br>
+    🔴 红色十字 = 目标坐标位置
+</div>
+<div class="legend">
+    分辨率对比:
+    <span class="red-line"></span> z17=~1.0m/px (概览) |
+    <span class="green-line"></span> z18=~0.5m/px (详细识别) |
+    <span class="red-line"></span> z19=~0.25m/px (单板识别)
+</div>
+
+        <div class="image-card">
+            <h3>z17_overview</h3>
+            <p>1280x1280px | ~1.013m/px</p>
+            <p>范围: [120.58319, 120.59692] x [31.98478, 31.99643]</p>
+            <img src="satellite_z17_overview.jpg" loading="lazy" style="max-width:100%;border:1px solid #333;border-radius:4px" />
+        </div>
+        <div class="image-card">
+            <h3>z18_detail</h3>
+            <p>768x768px | ~0.506m/px</p>
+            <p>范围: [120.58731, 120.59143] x [31.98828, 31.99177]</p>
+            <img src="satellite_z18_detail.jpg" loading="lazy" style="max-width:100%;border:1px solid #333;border-radius:4px" />
+        </div>
+        <div class="image-card">
+            <h3>z19_ultra</h3>
+            <p>768x768px | ~0.253m/px</p>
+            <p>范围: [120.58868, 120.59074] x [31.98886, 31.99061]</p>
+            <img src="satellite_z19_ultra.jpg" loading="lazy" style="max-width:100%;border:1px solid #333;border-radius:4px" />
+        </div>
+<div class="note">
+    ⚠️ <strong>说明:</strong> Esri World Imagery 为当前最新影像（非历史影像）。<br>
+    430/531 新政核查需采购 2025年3-6月的历史卫星影像（吉林一号/高分多模/北京二号）。<br>
+    当前图片仅演示分辨率效果 — z19 级别的 0.25m 分辨率可清晰分辨单块光伏板（约2.4㎡/块）。
+</div>
+</body>
+</html>

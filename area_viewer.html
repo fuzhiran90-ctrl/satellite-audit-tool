@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>框选区域卫星图</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:'Segoe UI','Microsoft YaHei',sans-serif;padding:24px}
+h1{color:#58a6ff;font-size:1.2em}
+h2{color:#8b949e;font-size:0.8em;font-weight:normal;margin:4px 0 18px}
+.info{background:#161b22;border-left:3px solid #3fb950;padding:14px 18px;margin:16px 0;border-radius:6px;font-size:0.85em;line-height:1.7}
+.info strong{color:#3fb950}
+.card{background:#161b22;padding:18px;margin:20px 0;border-radius:8px;border:1px solid #30363d}
+.card h3{color:#d2a8ff;margin-bottom:6px}
+.badge{background:#238636;color:#fff;font-size:0.75em;padding:2px 8px;border-radius:10px;margin-left:8px}
+.meta{color:#8b949e;font-size:0.8em;margin:2px 0 8px}
+.card img{max-width:100%;border-radius:4px;border:1px solid #30363d}
+.note{background:#1a1a0e;border:1px solid #d2991d;padding:14px;margin:24px 0;border-radius:6px;font-size:0.85em}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin:8px 0;font-size:0.8em;color:#8b949e}
+</style>
+</head>
+<body>
+<h1>框选区域卫星图 — 高德卫星图</h1>
+<h2>中心: 120.583568°E, 31.986328°N | 区域: 292m × 282m</h2>
+<div class="info">
+    📍 <strong>WGS-84 中心:</strong> 120.583568°E, 31.986328°N<br>
+    📐 <strong>范围:</strong> [120.582022, 120.585115] x [31.985061, 31.987594]<br>
+    🛰️ <strong>数据源:</strong> 高德卫星图 | 🔴 红色十字=中心 | 🟢 绿色虚线圈=100m半径
+</div>
+<div class="legend">
+    <span>🔴 红色十字 = 区域中心</span>
+    <span>🟢 绿色虚线圆 = 100m 半径</span>
+</div>
+
+        <div class="card">
+            <h3>z18 <span class="badge">0.51m/px</span></h3>
+            <div class="meta">577x558px | 覆盖 292m x 282m</div>
+            <a href="area_z18.jpg" target="_blank"><img src="area_z18.jpg" /></a>
+        </div>
+        <div class="card">
+            <h3>z19 <span class="badge">0.25m/px</span></h3>
+            <div class="meta">1153x1114px | 覆盖 292m x 282m</div>
+            <a href="area_z19.jpg" target="_blank"><img src="area_z19.jpg" /></a>
+        </div>
+<div class="note">
+    ✅ 这是你框选区域的精确卫星图。如果能在这个区域内看到规则排列的深色矩形块，那就是光伏板阵列。<br>
+    z19 (0.25m/px) 级别下，单块光伏板约占 9×4 像素，可清晰分辨。
+</div>
+</body>
+</html>

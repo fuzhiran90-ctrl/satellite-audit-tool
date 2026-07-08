@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>光伏核查 — 星图云历史影像</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;height:100vh;display:flex;flex-direction:column}
+
+/* Token bar */
+.token-bar{background:#1a1a0e;padding:6px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #d2991d;font-size:0.8em}
+.token-bar span{color:#d2991d;white-space:nowrap}
+.token-bar input{flex:1;max-width:420px;background:#0d1117;color:#ffcc00;border:1px solid #d2991d;padding:5px 8px;border-radius:4px;font-family:monospace;font-size:0.85em}
+.token-bar button{background:#9a6700;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:0.8em}
+.token-bar .ok{background:#238636}
+
+/* Search bar */
+.search-bar{background:#161b22;padding:8px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid #30363d;position:relative}
+.search-bar input{flex:1;min-width:180px;max-width:400px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:6px 10px;border-radius:6px;font-size:0.85em}
+.search-bar input:focus{border-color:#58a6ff;outline:none}
+.search-bar button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.8em;white-space:nowrap}
+.search-bar button:hover{background:#30363d}
+.search-bar .accent{background:#238636;border-color:#238636;color:#fff}
+.search-bar .warn{background:#9a6700;border-color:#9a6700;color:#fff}
+.search-bar .sep{width:1px;height:20px;background:#30363d;margin:0 2px}
+#searchResults{position:absolute;top:100%;left:0;right:0;background:#161b22;border:1px solid #30363d;border-radius:0 0 6px 6px;z-index:9999;max-height:350px;overflow-y:auto;display:none}
+#searchResults .item{padding:10px 12px;cursor:pointer;border-bottom:1px solid #21262d;color:#c9d1d9;font-size:0.82em}
+#searchResults .item:hover{background:#1f2a3a}
+#searchResults .item.highlight{border-left:3px solid #3fb950;background:#1a2e1a}
+#searchResults .item .name{color:#58a6ff;font-weight:bold}
+#searchResults .item .addr{color:#8b949e;font-size:0.85em}
+#searchResults .item .loc{color:#484f58;font-size:0.8em}
+#searchResults .empty{color:#8b949e;text-align:center;padding:20px}
+
+/* Main layout */
+.main{display:flex;flex:1;overflow:hidden}
+#mapContainer{flex:1;position:relative}
+#map{width:100%;height:100%}
+.map-status{position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,0.8);color:#7ee787;padding:4px 10px;border-radius:4px;font-family:monospace;font-size:0.7em;z-index:999;pointer-events:none}
+
+/* Panel */
+.panel{width:360px;background:#161b22;border-left:1px solid #30363d;overflow-y:auto;font-size:0.8em}
+.panel-section{padding:12px 14px;border-bottom:1px solid #30363d}
+.panel-section h3{color:#d2a8ff;font-size:0.88em;margin-bottom:8px}
+.panel-section label{display:block;color:#8b949e;font-size:0.72em;margin:4px 0 2px}
+.panel-section input,.panel-section select{width:100%;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:5px 8px;border-radius:4px;font-family:monospace;font-size:0.82em}
+.row{display:flex;gap:6px}.row input{flex:1}
+.coord-box{background:#0d1117;padding:8px;border-radius:4px;font-family:monospace;font-size:0.75em;line-height:1.7;color:#7ee787;word-break:break-all}
+.btn-full{width:100%;padding:7px;margin:2px 0;border-radius:6px;cursor:pointer;font-size:0.82em;border:1px solid #30363d;text-align:center}
+.btn-full.accent{background:#238636;border-color:#238636;color:#fff}
+.btn-full.normal{background:#21262d;color:#c9d1d9}
+.btn-full.warn{background:#9a6700;border-color:#9a6700;color:#fff}
+.note{background:#1a1a0e;border:1px solid #d2991d;padding:10px;margin-top:8px;border-radius:4px;font-size:0.75em;line-height:1.5;color:#e3b341}
+
+/* Year selector */
+.year-list{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.year-chip{padding:6px 12px;background:#21262d;border:1px solid #30363d;border-radius:16px;cursor:pointer;font-size:0.8em;color:#c9d1d9;white-space:nowrap}
+.year-chip:hover{background:#30363d;border-color:#58a6ff}
+.year-chip.active{background:#1f3a5f;border-color:#58a6ff;color:#58a6ff}
+.year-chip .badge{font-size:0.7em;color:#8b949e;margin-left:4px}
+</style>
+</head>
+<body>
+
+<!-- Token -->
+<div class="token-bar">
+    <span>🔑 Token:</span>
+    <input id="tokenInput" type="text" placeholder="输入星图云 API Token">
+    <button id="tokenBtn" onclick="saveToken()">保存</button>
+    <span id="tokenStatus" style="font-size:0.8em;color:#8b949e">未设置</span>
+    <span style="flex:1"></span>
+    <span style="color:#8b949e;font-size:0.75em">当前年份:</span>
+    <select id="activeYearSelect" onchange="switchActiveYear()" style="background:#0d1117;color:#58a6ff;border:1px solid #30363d;padding:4px 8px;border-radius:4px;font-size:0.8em">
+        <option value="current">当前影像 (0.5m)</option>
+    </select>
+</div>
+
+<!-- Search -->
+<div class="search-bar">
+    <input id="searchInput" type="text" placeholder="搜地址/企业/坐标 (如: 宏宝集团 / 永凝路 / 120.5489,31.9751)" onkeydown="if(event.key==='Enter')doSearch()">
+    <button onclick="doSearch()">🔍 搜索</button>
+    <span class="sep"></span>
+    <button class="accent" onclick="showManual()">📍 坐标</button>
+    <button onclick="startDrawRect()" id="drawBtn">▢ 框选</button>
+    <span class="sep"></span>
+    <button class="warn" onclick="queryHistory()" id="historyBtn">🕐 查询历史影像</button>
+    <span id="searchStatus" style="color:#8b949e;font-size:0.75em"></span>
+    <div id="searchResults"></div>
+</div>
+
+<!-- Main -->
+<div class="main">
+    <div id="mapContainer">
+        <div id="map"></div>
+        <div class="map-status" id="mapStatus">等待设置Token | 默认: 高德卫星图</div>
+    </div>
+
+    <div class="panel">
+        <!-- Position -->
+        <div class="panel-section">
+            <h3>📌 当前位置</h3>
+            <div class="coord-box" id="currentPos">120.5489250, 31.9750790 (WGS-84)<br>永凝路区域，张家港市大新镇</div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+                <button class="btn-full normal" style="flex:1" onclick="copyCoord()">📋 复制WGS-84</button>
+                <button class="btn-full normal" style="flex:1" onclick="reverseGeocode()">🔄 坐标→地址</button>
+            </div>
+        </div>
+
+        <!-- Area -->
+        <div class="panel-section">
+            <h3>📐 框选核查区域</h3>
+            <div class="coord-box" id="areaInfo">未框选 — 点击上方 ▢ 框选 按钮</div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+                <button class="btn-full normal" style="flex:1" onclick="clearArea()">清除</button>
+                <button class="btn-full accent" style="flex:1" onclick="exportArea()">导出GeoJSON</button>
+            </div>
+            <button class="btn-full warn" style="margin-top:4px" onclick="queryHistory()">🕐 查询此区域历史影像</button>
+        </div>
+
+        <!-- History results -->
+        <div class="panel-section" id="historyPanel" style="display:none">
+            <h3>🕐 可用历史影像</h3>
+            <div id="historyInfo" style="color:#8b949e;font-size:0.75em;margin-bottom:6px"></div>
+            <div class="year-list" id="yearList"></div>
+            <div id="historyDetail" style="color:#8b949e;font-size:0.75em;line-height:1.6;margin-top:6px"></div>
+        </div>
+
+        <!-- Tools -->
+        <div class="panel-section">
+            <h3>🔧 工具</h3>
+            <div style="display:flex;gap:4px;align-items:center;margin-bottom:6px">
+                <button class="btn-full normal" style="flex:1" onclick="mapZoom(-1)">🔍-</button>
+                <span style="color:#c9d1d9;min-width:24px;text-align:center" id="zoomLabel">17</span>
+                <button class="btn-full normal" style="flex:1" onclick="mapZoom(1)">🔍+</button>
+            </div>
+            <button class="btn-full normal" onclick="toggleCircle()" id="circleBtn">⭕ 100m圈(显示)</button>
+            <button class="btn-full normal" onclick="toggleMeasure()" id="measureBtn">📏 测距</button>
+            <button class="btn-full accent" onclick="captureMap()">📸 截图保存</button>
+        </div>
+
+        <!-- Basemap -->
+        <div class="panel-section">
+            <h3>🛰️ 底图</h3>
+            <select id="basemapSelect" onchange="setBasemap(this.value)" style="width:100%">
+                <option value="amap">高德卫星图 (免费备用)</option>
+                <option value="geovis">星图云当前影像 (0.5m)</option>
+            </select>
+        </div>
+
+        <!-- Manual -->
+        <div class="panel-section" id="manualPanel" style="display:none">
+            <h3>📍 手动坐标</h3>
+            <div class="row"><input id="mLng" placeholder="WGS-84经度"><input id="mLat" placeholder="WGS-84纬度"></div>
+            <button class="btn-full accent" style="margin-top:4px" onclick="goManual()">定位</button>
+        </div>
+
+        <!-- Status -->
+        <div class="panel-section">
+            <h3>📡 状态</h3>
+            <div id="apiStatus" style="color:#8b949e;font-size:0.72em;line-height:1.8">
+                <span style="color:#d2991d">●</span> Token: 未设置<br>
+                <span style="color:#d2991d">●</span> 地理编码: 待测试<br>
+                <span style="color:#d2991d">●</span> 历史影像: 待查询
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <h3>📖 使用说明</h3>
+            <div class="note">
+                <strong>核查流程:</strong><br>
+                1. 输入Token → 保存<br>
+                2. 搜索地址或手动定位<br>
+                3. 框选光伏区域<br>
+                4. 点击"查询历史影像"<br>
+                5. 选择验收年份，对比当前影像<br>
+                6. 截图保存为核查证据<br><br>
+                <strong>API地址 (已验证):</strong><br>
+                当前影像: /pj/base/v1/img/{z}/{x}/{y}<br>
+                POI搜索: /pj/geo/v2/assistant/suggestion<br>
+                地址解析: /pj/geo/v2/geocode/geo<br>
+                历史影像: /v2/timeSeries/history/city<br>
+                <br><strong>⚠️ 历史影像覆盖:</strong><br>
+                仅限主要城市(上海/合肥等)，张家港暂未覆盖
+            </div>
+        </div>
+    </div>
+</div>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script>
+// ==================== STATE ====================
+let TOKEN = '';
+let currentWgs = { lng: 120.548925, lat: 31.975079 };
+let activeYear = 'current';
+let historyData = {}; // { cityName: [{ year, format, bounds, tiles, scheme, type }] }
+let historyLayer = null;
+
+// ==================== COORDINATE UTILS ====================
+const PI=Math.PI, AX=6378245, EE=0.00669342162296594323;
+function _tLat(x,y){let r=-100+2*x+3*y+0.2*y*y+0.1*x*y+0.2*Math.sqrt(Math.abs(x));r+=(20*Math.sin(6*x*PI)+20*Math.sin(2*x*PI))*2/3;r+=(20*Math.sin(y*PI)+40*Math.sin(y/3*PI))*2/3;r+=(160*Math.sin(y/12*PI)+320*Math.sin(y*PI/30))*2/3;return r}
+function _tLon(x,y){let r=300+x+2*y+0.1*x*x+0.1*x*y+0.1*Math.sqrt(Math.abs(x));r+=(20*Math.sin(6*x*PI)+20*Math.sin(2*x*PI))*2/3;r+=(20*Math.sin(x*PI)+40*Math.sin(x/3*PI))*2/3;r+=(150*Math.sin(x/12*PI)+300*Math.sin(x/30*PI))*2/3;return r}
+function wgs2gcj(lng,lat){const dLat=_tLat(lng-105,lat-35),dLon=_tLon(lng-105,lat-35);const r=lat/180*PI;const m=1-EE*Math.sin(r)*Math.sin(r);const s=Math.sqrt(m);return{lng:lng+(dLon*180)/(AX/s*Math.cos(r)*PI),lat:lat+(dLat*180)/((AX*(1-EE))/(m*s)*PI)}}
+function gcj2wgs(lng,lat){let w={lng,lat};for(let i=0;i<5;i++){const t=wgs2gcj(w.lng,w.lat);w.lng+=lng-t.lng;w.lat+=lat-t.lat}return w}
+function gcj2bd(lng,lat){const z=Math.sqrt(lng*lng+lat*lat)+0.00002*Math.sin(lat*PI*3000/180);const th=Math.atan2(lat,lng)+0.000003*Math.cos(lng*PI*3000/180);return{lng:z*Math.cos(th)+0.0065,lat:z*Math.sin(th)+0.006}}
+function toMap(lng,lat){const gcj=wgs2gcj(lng,lat);return[gcj.lat,gcj.lng]}
+function fromMap(lat,lng){return gcj2wgs(lng,lat)}
+
+// ==================== TOKEN ====================
+function saveToken() {
+    TOKEN = document.getElementById('tokenInput').value.trim();
+    if (!TOKEN) { alert('请输入Token'); return; }
+    document.getElementById('tokenBtn').classList.add('ok');
+    document.getElementById('tokenBtn').textContent = '✓ 已保存';
+    document.getElementById('tokenStatus').innerHTML = '<span style="color:#3fb950">✓</span> 已设置';
+    document.getElementById('apiStatus').innerHTML =
+        '<span style="color:#3fb950">●</span> Token: 已设置<br>' +
+        '<span style="color:#d2991d">●</span> 地理编码: 待测试<br>' +
+        '<span style="color:#d2991d">●</span> 历史影像: 待查询';
+    if (document.getElementById('basemapSelect').value === 'geovis') initGeovisCurrent();
+    updateMapStatus();
+}
+
+// ==================== MAP LAYERS ====================
+const amapSat = L.tileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', {
+    subdomains: ['1','2','3','4'], maxNativeZoom: 18, maxZoom: 20
+});
+let geovisCurrentLayer = null;
+
+function initGeovisCurrent() {
+    if (!TOKEN) return;
+    if (geovisCurrentLayer) map.removeLayer(geovisCurrentLayer);
+    geovisCurrentLayer = L.tileLayer('https://api.open.geovisearth.com/pj/base/v1/img/{z}/{x}/{y}?format=webp&tmsIds=w&token=' + TOKEN, {
+        maxNativeZoom: 18, maxZoom: 20, attribution: '星图云 当前 | 0.5m'
+    });
+}
+
+function setBasemap(type) {
+    [amapSat].forEach(l => map.removeLayer(l));
+    if (geovisCurrentLayer) map.removeLayer(geovisCurrentLayer);
+    if (type === 'geovis' && TOKEN) {
+        initGeovisCurrent();
+        geovisCurrentLayer.addTo(map);
+    } else {
+        amapSat.addTo(map);
+    }
+    document.getElementById('basemapSelect').value = type;
+}
+
+const map = L.map('map', {
+    center: toMap(currentWgs.lng, currentWgs.lat),
+    zoom: 17, layers: [amapSat], zoomControl: false
+});
+
+// ==================== MARKERS ====================
+const centerMarker = L.circleMarker([0,0], {radius:8,color:'#ff0000',fillColor:'#ff0000',fillOpacity:0.6,weight:2}).addTo(map);
+let circle100m=null, circleShown=true;
+
+function updateMarker() {
+    const ll = toMap(currentWgs.lng, currentWgs.lat);
+    centerMarker.setLatLng(ll);
+    if (circleShown) {
+        if (circle100m) map.removeLayer(circle100m);
+        circle100m = L.circle(ll, {radius:100,color:'#ff8800',weight:2,fill:false,dashArray:'8,4',opacity:0.7}).addTo(map);
+    }
+    map.setView(ll, map.getZoom());
+}
+
+function updatePosDisplay() {
+    const gcj = wgs2gcj(currentWgs.lng, currentWgs.lat);
+    const bd = gcj2bd(gcj.lng, gcj.lat);
+    document.getElementById('currentPos').innerHTML =
+        '<b>WGS-84:</b> ' + currentWgs.lng.toFixed(7) + ', ' + currentWgs.lat.toFixed(7) + '<br>' +
+        '<b>GCJ-02:</b> ' + gcj.lng.toFixed(7) + ', ' + gcj.lat.toFixed(7) + '<br>' +
+        '<b>BD-09:</b> ' + bd.lng.toFixed(7) + ', ' + bd.lat.toFixed(7);
+}
+
+map.on('click', function(e) {
+    if (measuring) { addMeasurePoint(e.latlng); return; }
+    currentWgs = fromMap(e.latlng.lat, e.latlng.lng);
+    updateMarker(); updatePosDisplay(); updateMapStatus();
+});
+map.on('mousemove', function(e) {
+    const wgs = fromMap(e.latlng.lat, e.latlng.lng);
+    document.getElementById('mapStatus').textContent =
+        (activeYear === 'current' ? '当前' : activeYear) + ' | ' +
+        wgs.lng.toFixed(6) + ', ' + wgs.lat.toFixed(6) + ' (WGS-84) | z' + map.getZoom();
+});
+map.on('zoomend', () => { document.getElementById('zoomLabel').textContent = map.getZoom(); updateMapStatus(); });
+function updateMapStatus() {
+    document.getElementById('mapStatus').textContent =
+        (activeYear === 'current' ? '当前' : activeYear) + ' | ' +
+        currentWgs.lng.toFixed(6) + ', ' + currentWgs.lat.toFixed(6) + ' (WGS-84) | z' + map.getZoom();
+}
+
+// ==================== RECTANGLE ====================
+const drawnItems = new L.FeatureGroup();
+map.addLayer(drawnItems);
+const drawOptions = {
+    draw: { polyline:false, polygon:false, circle:false, circlemarker:false, marker:false,
+        rectangle: { shapeOptions: { color:'#00ff88',weight:2,fillColor:'#00ff88',fillOpacity:0.1 } } },
+    edit: { featureGroup: drawnItems, edit: { selectedPathOptions: { color:'#ffa500',weight:3 } } }
+};
+
+function startDrawRect() {
+    document.getElementById('drawBtn').textContent = '▢ 框选中...';
+    document.getElementById('drawBtn').style.background = '#9a6700';
+    const handler = new L.Draw.Rectangle(map, drawOptions.draw.rectangle);
+    handler.enable();
+    map.once(L.Draw.Event.CREATED, e => {
+        drawnItems.clearLayers();
+        drawnItems.addLayer(e.layer);
+        updateAreaInfo(e.layer);
+        document.getElementById('drawBtn').textContent = '▢ 框选';
+        document.getElementById('drawBtn').style.background = '';
+    });
+}
+
+function updateAreaInfo(layer) {
+    const b = layer.getBounds();
+    const sw = fromMap(b.getSouthWest().lat, b.getSouthWest().lng);
+    const ne = fromMap(b.getNorthEast().lat, b.getNorthEast().lng);
+    const mid = (sw.lat + ne.lat) / 2;
+    const wM = Math.abs(ne.lng - sw.lng) * 111320 * Math.cos(mid * PI / 180);
+    const hM = Math.abs(ne.lat - sw.lat) * 111320;
+    document.getElementById('areaInfo').innerHTML =
+        '<b>中心:</b> ' + ((sw.lng+ne.lng)/2).toFixed(7) + ', ' + ((sw.lat+ne.lat)/2).toFixed(7) + '<br>' +
+        '<b>SW:</b> ' + sw.lng.toFixed(7) + ', ' + sw.lat.toFixed(7) + '<br>' +
+        '<b>NE:</b> ' + ne.lng.toFixed(7) + ', ' + ne.lat.toFixed(7) + '<br>' +
+        '<b>尺寸:</b> ' + wM.toFixed(0) + 'm × ' + hM.toFixed(0) + 'm<br>' +
+        '<b>面积:</b> ' + (wM*hM/10000).toFixed(3) + ' ha<br>' +
+        '<b>bbox:</b> ' + sw.lng.toFixed(6) + ',' + sw.lat.toFixed(6) + ',' + ne.lng.toFixed(6) + ',' + ne.lat.toFixed(6);
+}
+function clearArea() { drawnItems.clearLayers(); document.getElementById('areaInfo').innerHTML = '未框选 — 点击上方 ▢ 框选 按钮'; }
+function exportArea() {
+    if (drawnItems.getLayers().length===0) { alert('请先框选'); return; }
+    const b = drawnItems.getLayers()[0].getBounds();
+    const sw = fromMap(b.getSouthWest().lat, b.getSouthWest().lng);
+    const ne = fromMap(b.getNorthEast().lat, b.getNorthEast().lng);
+    const geojson = { type:'Feature', properties:{activeYear}, geometry:{type:'Polygon',coordinates:[[[sw.lng,sw.lat],[ne.lng,sw.lat],[ne.lng,ne.lat],[sw.lng,ne.lat],[sw.lng,sw.lat]]]} };
+    const blob = new Blob([JSON.stringify(geojson,null,2)],{type:'application/json'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'area_'+new Date().toISOString().slice(0,10)+'.geojson'; a.click();
+}
+
+// ==================== HISTORY QUERY ====================
+async function queryHistory() {
+    if (!TOKEN) { alert('请先输入Token'); return; }
+    if (drawnItems.getLayers().length === 0) { alert('请先用 ▢ 框选 工具在地图上框选核查区域'); return; }
+
+    const b = drawnItems.getLayers()[0].getBounds();
+    const sw = fromMap(b.getSouthWest().lat, b.getSouthWest().lng);
+    const ne = fromMap(b.getNorthEast().lat, b.getNorthEast().lng);
+    const bbox = sw.lng.toFixed(6) + ',' + sw.lat.toFixed(6) + ',' + ne.lng.toFixed(6) + ',' + ne.lat.toFixed(6);
+
+    document.getElementById('searchStatus').textContent = '查询历史影像...';
+    document.getElementById('historyPanel').style.display = 'block';
+    document.getElementById('historyInfo').textContent = 'bbox: ' + bbox + ' | 查询中...';
+
+    try {
+        const url = 'https://api.open.geovisearth.com/v2/timeSeries/history/city?bbox=' + bbox + '&token=' + TOKEN;
+        console.log('Querying:', url);
+        const resp = await fetch(url);
+        const data = await resp.json();
+        console.log('History response:', data);
+
+        // Response format: { "cityName": [{ year, format, bounds, tiles, scheme, type, isIntersect }] }
+        const cities = Object.keys(data);
+        if (cities.length === 0) {
+            document.getElementById('historyInfo').textContent = '该区域无历史影像数据 (bbox: ' + bbox + ')';
+            document.getElementById('yearList').innerHTML = '';
+            document.getElementById('historyDetail').innerHTML =
+                '<span style="color:#d2991d">该区域不在历史影像覆盖范围内。</span><br>' +
+                '<small style="color:#8b949e">当前覆盖城市: 上海(2016-2022)、南京(2016-2022)、杭州(2016-2022)、合肥(2017-2022)</small><br>' +
+                '<small style="color:#8b949e">如需核查此区域的历史影像，建议联系星图云或使用Google Earth Engine</small>';
+            document.getElementById('apiStatus').innerHTML =
+                '<span style="color:#3fb950">●</span> Token: 已设置<br>' +
+                '<span style="color:#3fb950">●</span> 搜索: OK<br>' +
+                '<span style="color:#da3633">●</span> 历史影像: 区域未覆盖';
+            document.getElementById('searchStatus').textContent = '区域无历史影像覆盖';
+            return;
+        }
+
+        historyData = data;
+        let allYears = [];
+        let totalCount = 0;
+
+        for (const city of cities) {
+            const years = data[city];
+            if (Array.isArray(years)) {
+                years.forEach(y => {
+                    allYears.push({ city, ...y });
+                    totalCount++;
+                });
+            }
+        }
+
+        // Sort by year descending
+        allYears.sort((a, b) => parseInt(b.year) - parseInt(a.year));
+
+        // Update year selector in top bar
+        const yearSelect = document.getElementById('activeYearSelect');
+        yearSelect.innerHTML = '<option value="current">当前影像 (0.5m)</option>';
+        allYears.forEach(y => {
+            yearSelect.innerHTML += '<option value="' + y.year + '">' + y.year + ' 年 (' + y.city + ')</option>';
+        });
+
+        // Display year chips
+        const yearList = document.getElementById('yearList');
+        yearList.innerHTML = allYears.map(y =>
+            '<div class="year-chip" onclick="loadHistoryYear(\'' + y.year + '\',\'' + y.city + '\')" title="' + y.city + ' | ' + (y.bounds||[]).join(',') + '">' +
+            y.year + '<span class="badge">' + y.city + '</span></div>'
+        ).join('');
+
+        document.getElementById('historyInfo').textContent =
+            '找到 ' + totalCount + ' 个年份 | 城市: ' + cities.join(', ') + ' | bbox: ' + bbox;
+        document.getElementById('historyDetail').textContent =
+            '年份范围: ' + (allYears[allYears.length-1]?.year || '?') + ' - ' + (allYears[0]?.year || '?') +
+            ' | 点击年份标签加载历史影像';
+
+        document.getElementById('apiStatus').innerHTML =
+            '<span style="color:#3fb950">●</span> Token: 已设置<br>' +
+            '<span style="color:#3fb950">●</span> 地理编码: OK<br>' +
+            '<span style="color:#3fb950">●</span> 历史影像: ' + totalCount + ' 年可用';
+
+        document.getElementById('searchStatus').textContent = '找到 ' + totalCount + ' 个历史年份';
+
+    } catch(e) {
+        document.getElementById('historyInfo').textContent = '查询失败: ' + e.message;
+        document.getElementById('searchStatus').textContent = '查询失败';
+        console.error(e);
+    }
+}
+
+function loadHistoryYear(year, city) {
+    activeYear = year;
+    document.getElementById('activeYearSelect').value = year;
+
+    // Remove previous history layer
+    if (historyLayer) { map.removeLayer(historyLayer); historyLayer = null; }
+    // Remove current geovis layer
+    if (geovisCurrentLayer) map.removeLayer(geovisCurrentLayer);
+
+    // Find the year data
+    const cityData = historyData[city];
+    if (!cityData) return;
+    const yearData = cityData.find(y => y.year === year);
+    if (!yearData || !yearData.tiles || yearData.tiles.length === 0) {
+        alert('该年份无可用瓦片');
+        return;
+    }
+
+    // Use first tile URL as template
+    let tileUrl = yearData.tiles[0];
+    // Replace {z}/{x}/{y} placeholders (they might be encoded or different format)
+    // The URL should already contain {z}, {x}, {y} or similar placeholders
+    tileUrl = tileUrl.replace(/\{z\}/g, '{z}').replace(/\{x\}/g, '{x}').replace(/\{y\}/g, '{y}');
+
+    console.log('Loading history tiles:', tileUrl);
+
+    historyLayer = L.tileLayer(tileUrl, {
+        maxNativeZoom: 18, maxZoom: 20,
+        attribution: '星图云 ' + year + ' | ' + city,
+        errorTileUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect fill="%231a1a2e" width="256" height="256"/><text x="128" y="128" text-anchor="middle" fill="%23888" font-size="14">No Tile</text></svg>'
+    });
+
+    // Keep amap as background, add history as overlay
+    if (!map.hasLayer(amapSat)) amapSat.addTo(map);
+    historyLayer.addTo(map);
+
+    // Highlight active chip
+    document.querySelectorAll('.year-chip').forEach(c => c.classList.remove('active'));
+    const chips = document.querySelectorAll('.year-chip');
+    chips.forEach(c => { if (c.textContent.includes(year)) c.classList.add('active'); });
+
+    document.getElementById('historyDetail').textContent =
+        '已加载: ' + year + ' | ' + city + ' | bounds: ' + (yearData.bounds||[]).join(', ');
+    updateMapStatus();
+}
+
+function switchActiveYear() {
+    const val = document.getElementById('activeYearSelect').value;
+    if (val === 'current') {
+        activeYear = 'current';
+        if (historyLayer) { map.removeLayer(historyLayer); historyLayer = null; }
+        if (geovisCurrentLayer && TOKEN) { geovisCurrentLayer.addTo(map); }
+        else { amapSat.addTo(map); }
+        document.querySelectorAll('.year-chip').forEach(c => c.classList.remove('active'));
+        updateMapStatus();
+    } else {
+        // Find which city has this year
+        for (const city of Object.keys(historyData)) {
+            if (historyData[city].find(y => y.year === val)) {
+                loadHistoryYear(val, city);
+                return;
+            }
+        }
+    }
+}
+
+// ==================== GEOCODING ====================
+let _searchCache = [];
+
+// Parse user query to extract meaningful parts
+function parseQuery(q) {
+    const trimmed = q.trim();
+    // Detect if it looks like a coordinate pair
+    const coordMatch = trimmed.match(/^[\s]*(\d{2,3}\.\d+)[,\s]+(\d{2,3}\.\d+)[\s]*$/);
+    if (coordMatch) return { type: 'coord', lng: parseFloat(coordMatch[1]), lat: parseFloat(coordMatch[2]) };
+
+    // Check if it ends with a door number (digits at end after road/street/lane name)
+    const noNumber = trimmed.replace(/[\d]+号?$/, '').replace(/[\s,，]+$/, '');
+    const hasNumber = noNumber !== trimmed;
+
+    return { type: 'address', original: trimmed, noNumber: hasNumber ? noNumber : null };
+}
+
+async function geocodeOne(keyword, region) {
+    let url = 'https://api.open.geovisearth.com/pj/geo/v2/geocode/geo?keyword=' + encodeURIComponent(keyword) + '&pageSize=10&token=' + TOKEN;
+    if (region) url += '&region=' + encodeURIComponent(region);
+    console.log('  Geocode:', url.substring(0, 120) + '...');
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.code === 0 && Array.isArray(data.data)) {
+        return data.data.map(r => {
+            const loc = (r.location || '').split(',');
+            return {
+                name: r.street || r.formattedAddress || '未知',
+                addr: r.formattedAddress || '',
+                province: r.province || '',
+                city: r.city || '',
+                district: r.district || '',
+                adCode: r.adCode || '',
+                lng: parseFloat(loc[0]) || 0,
+                lat: parseFloat(loc[1]) || 0
+            };
+        }).filter(r => r.lng !== 0 && r.lat !== 0);
+    }
+    return [];
+}
+
+// POI Suggestion API — best for businesses, landmarks, named places
+async function searchPoi(keyword, region) {
+    let url = 'https://api.open.geovisearth.com/pj/geo/v2/assistant/suggestion?keyword=' + encodeURIComponent(keyword) + '&pageSize=10&token=' + TOKEN;
+    if (region === '苏州市') url += '&code=320500';
+    else if (region === '江苏省') url += '&code=320000';
+    console.log('  POI:', url.substring(0, 120) + '...');
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.code === 0 && Array.isArray(data.data)) {
+        return data.data.map(r => {
+            const loc = (r.location || '').split(',');
+            return {
+                name: r.name || '',
+                addr: r.address || r.district || '',
+                district: r.district || '',
+                lng: parseFloat(loc[0]) || 0,
+                lat: parseFloat(loc[1]) || 0,
+                source: 'POI'
+            };
+        }).filter(r => r.lng !== 0 && r.lat !== 0);
+    }
+    return [];
+}
+
+// Score results for sorting
+function scoreResult(r, originalQuery) {
+    let s = 0;
+    const full = (r.district || '') + (r.addr || '');
+
+    if (full.includes('张家港市')) s += 100;
+    else if (full.includes('苏州市')) s += 60;
+    else if (full.includes('江苏省')) s += 30;
+
+    // POI name exact match is a strong signal
+    if (r.name && originalQuery && r.name.includes(originalQuery)) s += 50;
+
+    // Having a specific address/name (not just city-level)
+    if (r.name && r.name.length > 4) s += 10;
+
+    // POI results that are actual businesses (not generic roads/towns)
+    if (r.source === 'POI' && r.name && !r.name.endsWith('路') && !r.name.endsWith('镇') && !r.name.endsWith('市')) s += 20;
+
+    return s;
+}
+
+async function doSearch() {
+    const q = document.getElementById('searchInput').value.trim();
+    if (!q) return;
+    if (!TOKEN) { alert('请先设置Token'); return; }
+
+    const resultsDiv = document.getElementById('searchResults');
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = '<div class="empty">搜索中... (地址 + POI 双引擎)</div>';
+    document.getElementById('searchStatus').textContent = '搜索中...';
+
+    try {
+        const parsed = parseQuery(q);
+
+        // Coordinate search shortcut
+        if (parsed.type === 'coord') {
+            currentWgs = { lng: parsed.lng, lat: parsed.lat };
+            updateMarker(); updatePosDisplay(); updateMapStatus();
+            resultsDiv.innerHTML = '<div class="empty">已定位至坐标: ' + parsed.lng.toFixed(6) + ', ' + parsed.lat.toFixed(6) + '</div>';
+            document.getElementById('searchStatus').textContent = '坐标定位完成';
+            setTimeout(() => { resultsDiv.style.display = 'none'; }, 2000);
+            return;
+        }
+
+        // Build query variants
+        const queries = [parsed.original];
+        if (parsed.noNumber && parsed.noNumber.length >= 2 && parsed.noNumber !== parsed.original) {
+            queries.push(parsed.noNumber);
+        }
+
+        // Fire ALL in parallel: Geocode + POI x each query x with/without region
+        const tasks = [];
+        for (const kw of queries) {
+            tasks.push(geocodeOne(kw, '苏州市').then(r => r));    // Geocode: Suzhou region
+            tasks.push(geocodeOne(kw, '').then(r => r));          // Geocode: no region
+            tasks.push(searchPoi(kw, '苏州市').then(r => r));     // POI: Suzhou adCode
+            tasks.push(searchPoi(kw, '').then(r => r));           // POI: no region
+        }
+
+        const allBatches = await Promise.all(tasks);
+        console.log('Search batches done:', allBatches.map(b => b.length).join(','), 'items');
+
+        // Merge with dedup
+        const seen = new Map();
+        const allItems = [];
+        for (const items of allBatches) {
+            for (const r of items) {
+                const key = r.lng.toFixed(3) + ',' + r.lat.toFixed(3);
+                if (!seen.has(key)) {
+                    seen.set(key, true);
+                    allItems.push(r);
+                }
+            }
+        }
+
+        _searchCache = allItems;
+        _searchCache.sort((a, b) => scoreResult(b, q) - scoreResult(a, q));
+
+        if (_searchCache.length === 0) {
+            resultsDiv.innerHTML = '<div class="empty">未找到结果<br><small style="color:#8b949e">建议: 简化关键词 (如"永凝路"而非"永凝路218号")<br>或直接输入坐标 (如 "120.5489, 31.9751")<br>企业名称搜索更佳 (如"宏宝集团")</small></div>';
+        } else {
+            resultsDiv.innerHTML = _searchCache.map((r, i) => {
+                const isLocal = (r.district || r.addr || '').includes('张家港市');
+                const sourceBadge = r.source === 'POI' ? '<span style="color:#d2a8ff;font-size:0.7em;border:1px solid #d2a8ff;padding:1px 4px;border-radius:3px;margin-left:4px">POI</span>' : '';
+                return '<div class="item' + (isLocal ? ' highlight' : '') + '" onclick="selectResult(' + i + ')">' +
+                    '<div class="name">' + r.name + sourceBadge + (isLocal ? ' <span style="color:#3fb950;font-size:0.75em">✓本地</span>' : '') + '</div>' +
+                    '<div class="addr">' + (r.addr || '') + '</div>' +
+                    '<div class="loc">' + r.lng.toFixed(6) + ', ' + r.lat.toFixed(6) + ' (WGS-84)</div>' +
+                    '</div>';
+            }).join('');
+        }
+        document.getElementById('searchStatus').textContent = '找到 ' + _searchCache.length + ' 条 (地址+POI双引擎)';
+        document.getElementById('apiStatus').innerHTML =
+            '<span style="color:#3fb950">●</span> Token: 已设置<br>' +
+            '<span style="color:#3fb950">●</span> 搜索: ' + _searchCache.length + ' 条结果<br>' +
+            '<span style="color:#d2991d">●</span> 历史影像: 待查询';
+    } catch(e) {
+        resultsDiv.innerHTML = '<div class="empty">网络错误: ' + e.message + '<br>请检查Token和网络</div>';
+    }
+}
+
+function selectResult(i) {
+    const r = _searchCache[i]; if (!r) return;
+    currentWgs = { lng: r.lng, lat: r.lat };
+    updateMarker(); updatePosDisplay(); updateMapStatus();
+    document.getElementById('searchResults').style.display = 'none';
+    document.getElementById('searchInput').value = r.name + ' — ' + (r.district || r.addr || '');
+}
+
+async function reverseGeocode() {
+    if (!TOKEN) { alert('请先设置Token'); return; }
+    const kw = currentWgs.lng.toFixed(6) + ',' + currentWgs.lat.toFixed(6);
+    try {
+        // Try POI suggestion first (returns nearby businesses/places)
+        let resp = await fetch('https://api.open.geovisearth.com/pj/geo/v2/assistant/suggestion?keyword=' + encodeURIComponent(kw) + '&pageSize=5&token=' + TOKEN);
+        let data = await resp.json();
+        console.log('Reverse (POI):', data);
+        if (data.code === 0 && Array.isArray(data.data) && data.data.length > 0) {
+            const names = data.data.map(d => d.name + '\n  ' + (d.address || d.district || '')).filter(Boolean);
+            alert('附近POI:\n' + names.join('\n'));
+            return;
+        }
+        // Fallback: geocode
+        resp = await fetch('https://api.open.geovisearth.com/pj/geo/v2/geocode/geo?keyword=' + encodeURIComponent(kw) + '&pageSize=5&token=' + TOKEN);
+        data = await resp.json();
+        if (data.code === 0 && Array.isArray(data.data) && data.data.length > 0) {
+            const names = data.data.map(d => d.formattedAddress || d.street || '').filter(Boolean);
+            alert('逆地理编码:\n' + names.join('\n'));
+        } else {
+            alert('该坐标无地址信息');
+        }
+    } catch(e) { alert('失败: '+e.message); }
+}
+
+// Click outside to close search results
+document.addEventListener('click', e => {
+    if (!e.target.closest('#searchResults') && !e.target.closest('.search-bar')) {
+        document.getElementById('searchResults').style.display = 'none';
+    }
+});
+
+// ==================== TOOLS ====================
+function mapZoom(d) { map.setZoom(Math.max(14, Math.min(20, map.getZoom()+d))); }
+function toggleCircle() {
+    circleShown = !circleShown;
+    if (circleShown) { const ll = toMap(currentWgs.lng, currentWgs.lat); circle100m = L.circle(ll, {radius:100,color:'#ff8800',weight:2,fill:false,dashArray:'8,4',opacity:0.7}).addTo(map); }
+    else { if (circle100m) { map.removeLayer(circle100m); circle100m = null; } }
+    document.getElementById('circleBtn').textContent = circleShown ? '⭕ 100m圈(显示)' : '⭕ 100m圈(隐藏)';
+}
+let measurePoints=[], measureLines=[], measuring=false;
+function toggleMeasure() {
+    measuring = !measuring;
+    map.getContainer().style.cursor = measuring ? 'crosshair' : '';
+    document.getElementById('measureBtn').textContent = measuring ? '📏 测距(激活)' : '📏 测距';
+    if (!measuring) { measurePoints.forEach(p => map.removeLayer(p)); measureLines.forEach(l => map.removeLayer(l)); measurePoints=[]; measureLines=[]; }
+}
+function addMeasurePoint(latlng) {
+    const pt = L.circleMarker(latlng, {radius:4,color:'#ff0',fillColor:'#ff0',fillOpacity:0.8}).addTo(map);
+    measurePoints.push(pt);
+    if (measurePoints.length>=2) {
+        const p1=measurePoints[measurePoints.length-2].getLatLng(), p2=measurePoints[measurePoints.length-1].getLatLng();
+        const line=L.polyline([p1,p2],{color:'#ff0',weight:2,dashArray:'4,4'}).addTo(map);
+        line.bindTooltip(Math.round(p1.distanceTo(p2))+'m',{permanent:true,direction:'center'}).openTooltip();
+        measureLines.push(line);
+    }
+}
+function showManual() { document.getElementById('manualPanel').style.display='block'; document.getElementById('mLng').value=currentWgs.lng.toFixed(7); document.getElementById('mLat').value=currentWgs.lat.toFixed(7); }
+function goManual() {
+    const lng=parseFloat(document.getElementById('mLng').value), lat=parseFloat(document.getElementById('mLat').value);
+    if(isNaN(lng)||isNaN(lat)) return;
+    currentWgs={lng,lat}; updateMarker(); updatePosDisplay(); updateMapStatus();
+}
+function copyCoord() { navigator.clipboard.writeText(currentWgs.lng.toFixed(7)+', '+currentWgs.lat.toFixed(7)).then(()=>alert('已复制')); }
+async function captureMap() {
+    try {
+        const canvas=await html2canvas(document.getElementById('mapContainer'),{useCORS:true,allowTaint:true,backgroundColor:'#0d1117'});
+        const a=document.createElement('a'); a.href=canvas.toDataURL('image/png');
+        a.download='geovis_'+currentWgs.lng.toFixed(4)+'_'+currentWgs.lat.toFixed(4)+'_'+activeYear+'_'+new Date().toISOString().slice(0,10)+'.png'; a.click();
+    } catch(e) { alert('截图失败: '+e.message); }
+}
+
+// ==================== INIT ====================
+updatePosDisplay(); updateMapStatus();
+circle100m = L.circle(toMap(currentWgs.lng, currentWgs.lat), {radius:100,color:'#ff8800',weight:2,fill:false,dashArray:'8,4',opacity:0.7}).addTo(map);
+</script>
+</body>
+</html>

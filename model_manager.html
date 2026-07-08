@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>审计模型与疑点管理</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;color:#c9d1d9;height:100vh;display:flex;flex-direction:column}
+
+/* Header */
+.header{background:#161b22;border-bottom:1px solid #30363d;padding:10px 16px;display:flex;align-items:center;gap:12px}
+.header h1{font-size:1.1em;color:#d2a8ff;display:flex;align-items:center;gap:8px}
+.header .actions{flex:1;display:flex;gap:8px;justify-content:flex-end}
+.header button{padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8em;border:1px solid #30363d;white-space:nowrap}
+.btn-primary{background:#7c3aed;border-color:#7c3aed!important;color:#fff}
+.btn-accent{background:#238636;border-color:#238636!important;color:#fff}
+.btn-warn{background:#9a6700;border-color:#9a6700!important;color:#fff}
+.btn-normal{background:#21262d;color:#c9d1d9}
+.btn-danger{background:#8b1a1a;border-color:#8b1a1a!important;color:#fff}
+.header button:hover{filter:brightness(1.2)}
+
+/* Main layout */
+.main{display:flex;flex:1;overflow:hidden}
+
+/* Sidebar */
+.sidebar{width:280px;background:#161b22;border-right:1px solid #30363d;display:flex;flex-direction:column;overflow:hidden}
+.sidebar-header{padding:10px 12px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:8px}
+.sidebar-header span{font-weight:bold;font-size:0.85em;color:#8b949e}
+.sidebar-header .count{font-size:0.75em;background:#7c3aed;color:#fff;padding:2px 8px;border-radius:10px}
+.model-list{flex:1;overflow-y:auto;padding:6px}
+.model-item{padding:10px 12px;margin:2px 0;border-radius:6px;cursor:pointer;border:1px solid transparent;transition:all 0.15s;display:flex;align-items:center;gap:8px}
+.model-item:hover{border-color:#30363d;background:#1c2128}
+.model-item.active{border-color:#7c3aed;background:#1a1630}
+.model-item .icon{font-size:1.3em}
+.model-item .info{flex:1;min-width:0}
+.model-item .info .name{font-size:0.82em;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.model-item .info .cat{font-size:0.7em;color:#8b949e}
+.model-item .info .count{font-size:0.7em;color:#58a6ff}
+.sidebar-footer{padding:10px;border-top:1px solid #30363d}
+
+/* Content */
+.content{flex:1;overflow-y:auto;padding:16px}
+.empty-state{text-align:center;padding:80px 20px;color:#484f58}
+.empty-state .icon{font-size:3em;margin-bottom:16px}
+.empty-state p{font-size:0.9em;line-height:1.8}
+
+/* Tabs */
+.tabs{display:flex;gap:2px;margin-bottom:16px;border-bottom:2px solid #30363d}
+.tab{padding:8px 20px;cursor:pointer;border-radius:6px 6px 0 0;font-size:0.85em;color:#8b949e;border:1px solid transparent;border-bottom:none;background:transparent}
+.tab:hover{color:#c9d1d9}
+.tab.active{color:#d2a8ff;border-color:#30363d;border-bottom-color:#0d1117;background:#0d1117;margin-bottom:-2px;border-bottom:2px solid #0d1117}
+
+/* Form */
+.form-group{margin-bottom:12px}
+.form-group label{display:block;color:#8b949e;font-size:0.75em;margin-bottom:4px}
+.form-group input,.form-group select,.form-group textarea{width:100%;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:7px 10px;border-radius:6px;font-family:inherit;font-size:0.85em}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:#58a6ff;outline:none}
+.form-group textarea{resize:vertical;min-height:60px;font-family:monospace;font-size:0.78em;line-height:1.5}
+.form-row{display:flex;gap:8px}
+.form-row .form-group{flex:1}
+
+/* Findings table */
+.table-wrap{overflow-x:auto;margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:0.78em}
+th{text-align:left;padding:8px 10px;background:#1c2128;color:#8b949e;font-weight:normal;border-bottom:2px solid #30363d;white-space:nowrap}
+td{padding:6px 10px;border-bottom:1px solid #21262d;vertical-align:middle}
+tr:hover td{background:#161b22}
+tr.selected td{background:#1a1630}
+td .cell-input{background:transparent;border:1px solid transparent;color:inherit;padding:3px 6px;border-radius:3px;font-family:inherit;font-size:inherit;width:100%;min-width:60px}
+td .cell-input:focus{border-color:#58a6ff;background:#0d1117;outline:none}
+td .cell-input.num{width:70px;text-align:right}
+.actions-cell{white-space:nowrap;text-align:center}
+.actions-cell button{padding:3px 8px;border-radius:4px;cursor:pointer;font-size:0.75em;border:1px solid #30363d;background:#21262d;color:#c9d1d9;margin:1px}
+.actions-cell button.danger{color:#ff7b72}
+.actions-cell button:hover{background:#30363d}
+
+/* Section */
+.section-title{font-size:0.9em;color:#d2a8ff;margin:16px 0 10px;padding-bottom:6px;border-bottom:1px solid #21262d;display:flex;align-items:center;gap:8px}
+.section-title .badge{font-size:0.75em;background:#7c3aed;color:#fff;padding:2px 8px;border-radius:10px}
+.section-actions{display:flex;gap:6px;margin-left:auto}
+
+/* Toast */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;padding:10px 24px;border-radius:8px;font-size:0.85em;z-index:99999;opacity:0;transition:opacity 0.3s;pointer-events:none}
+.toast.show{opacity:1}
+.toast.error{background:#8b1a1a}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9998;display:flex;align-items:center;justify-content:center}
+.modal{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:20px;width:500px;max-width:90vw;max-height:80vh;overflow-y:auto}
+.modal h3{color:#d2a8ff;margin-bottom:14px}
+.modal .btn-row{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+
+/* Category tags */
+.cat-tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.7em;background:#1f3a5f;color:#58a6ff;margin:1px}
+
+/* Help text */
+.help{font-size:0.72em;color:#484f58;margin-top:4px}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+    <h1>⚙️ 审计模型与疑点管理</h1>
+    <span style="color:#8b949e;font-size:0.8em">|</span>
+    <span style="color:#8b949e;font-size:0.78em">管理审计模型下拉框选项及各模型对应的疑点清单</span>
+    <div class="actions">
+        <button class="btn-normal" onclick="exportAll()">📥 导出全部数据</button>
+        <button class="btn-normal" onclick="document.getElementById('importFile').click()">📤 导入数据</button>
+        <input type="file" id="importFile" accept=".json" style="display:none" onchange="importAll(event)">
+        <button class="btn-warn" onclick="resetToDefault()">🔄 恢复默认</button>
+        <button class="btn-accent" onclick="window.open('audit_tool.html','_blank')">🔗 打开主工具</button>
+    </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <span>📋 审计模型列表</span>
+            <span class="count" id="modelCount">0</span>
+        </div>
+        <div class="model-list" id="modelList"></div>
+        <div class="sidebar-footer">
+            <button class="btn-primary" style="width:100%" onclick="addModel()">＋ 新建审计模型</button>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content" id="contentArea">
+        <div class="empty-state">
+            <div class="icon">📋</div>
+            <p>选择一个模型进行编辑<br>或点击左侧 <b style="color:#7c3aed">＋ 新建审计模型</b></p>
+            <p style="font-size:0.8em;color:#484f58">模型下拉框选项 + 每个模型对应的疑点清单统一管理</p>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ===================================================================
+//  Storage key
+// ===================================================================
+const STORAGE_KEY_MODELS = 'audit_tool_models';
+const STORAGE_KEY_FINDINGS = 'audit_tool_findings'; // { modelId: [finding, ...] }
+
+// ===================================================================
+//  Default data (fallback)
+// ===================================================================
+const DEFAULT_MODELS = [
+    { id:'pv_hours_anomaly',    name:'光伏发电小时异常模型',  icon:'☀️', category:'新能源审计',
+      desc:'识别月均发电小时数低于60小时的分布式光伏用户，排查发电异常、设备故障或虚报并网容量。',
+      fields:'户名,地址,并网容量(kW),并网时间,月均发电小时', threshold:'月发电小时数 < 60小时' },
+    { id:'pv_siting_compliance', name:'光伏电站选址合规模型', icon:'🏗️', category:'新能源审计',
+      desc:'核查光伏电站是否建设在基本农田、生态红线、自然保护区等禁止建设区域。',
+      fields:'电站名称,地址,装机容量(MW),占地类型,合规状态', threshold:'占地类型 ∈ [基本农田,生态红线,自然保护区]' },
+    { id:'farmland_occupation',  name:'耕地占用检测模型',      icon:'🌾', category:'土地审计',
+      desc:'通过卫星影像对比分析，识别新增建设用地是否占用基本农田或耕地。',
+      fields:'地块编号,位置,占地面积(亩),原用途,现用途,变化年份', threshold:'耕地→非农建设 且 未经审批' },
+    { id:'water_pollution',      name:'水体污染遥感模型',      icon:'💧', category:'环保审计',
+      desc:'利用多光谱遥感数据分析水体颜色异常、富营养化、悬浮物浓度变化。',
+      fields:'水体名称,位置,面积(km²),水质等级,异常类型,检测时间', threshold:'NDWI异常 或 叶绿素a浓度 > 50μg/L' },
+    { id:'vegetation_change',    name:'植被覆盖变化模型',      icon:'🌿', category:'生态审计',
+      desc:'基于NDVI时序分析，检测植被覆盖显著减少区域。',
+      fields:'区域名称,位置,变化面积(ha),NDVI变化量,变化时间段,疑似原因', threshold:'NDVI下降 > 0.3 且 面积 > 1ha' },
+    { id:'construction_expansion',name:'建设用地扩张模型',     icon:'🏢', category:'土地审计',
+      desc:'监测城市/工业园区建设用地边界变化，核查超规划范围建设。',
+      fields:'项目名称,位置,规划面积(ha),实际面积(ha),超出比例,发现时间', threshold:'实际面积 > 规划面积 × 1.1' },
+    { id:'mining_boundary',      name:'矿山越界开采模型',      icon:'⛏️', category:'矿产审计',
+      desc:'对比采矿权边界与实际开采面，识别越界开采行为。',
+      fields:'矿山名称,位置,矿权面积(ha),越界面积(ha),越界方向,检测时间', threshold:'开采面超出矿权边界' },
+    { id:'deforestation',        name:'森林砍伐检测模型',      icon:'🌲', category:'林业审计',
+      desc:'利用高分辨率卫星影像检测森林覆盖减少，区分合法采伐与非法砍伐。',
+      fields:'林班编号,位置,砍伐面积(ha),审批面积(ha),差异面积(ha),检测时间', threshold:'实际砍伐 > 审批面积' },
+    { id:'solid_waste',          name:'固废违规堆放模型',      icon:'🗑️', category:'环保审计',
+      desc:'通过影像纹理和光谱特征识别疑似固废堆放点。',
+      fields:'堆放点编号,位置,占地面积(m²),疑似类型,距离居民区(m),发现时间', threshold:'非规划场地 且 面积 > 500m²' },
+    { id:'coastline_change',     name:'海岸线变化监测模型',    icon:'🌊', category:'海洋审计',
+      desc:'提取历年海岸线位置，识别侵蚀/淤积变化，核查围填海项目审批合规性。',
+      fields:'岸段编号,位置,变化长度(m),变化类型,变化速率(m/年),是否审批', threshold:'围填海 且 未经审批' }
+];
+
+const DEFAULT_FINDINGS = {
+    'pv_hours_anomaly': [
+        { id:'PV001', name:'张永福', addr:'张家港市大新镇永凝路218号',    capacity:15, gridDate:'2023-06-15', monthlyHours:42.5, lng:120.548925, lat:31.975079 },
+        { id:'PV002', name:'李建明', addr:'张家港市锦丰镇锦南路56号',     capacity:20, gridDate:'2022-11-20', monthlyHours:38.2, lng:120.619830, lat:31.962410 },
+        { id:'PV003', name:'王德发', addr:'张家港市杨舍镇沙洲西路128号',   capacity:10, gridDate:'2023-03-08', monthlyHours:51.7, lng:120.538240, lat:31.873850 },
+        { id:'PV004', name:'陈志强', addr:'张家港市塘桥镇北京路33号',     capacity:25, gridDate:'2022-08-12', monthlyHours:29.8, lng:120.652100, lat:31.824300 },
+        { id:'PV005', name:'赵永刚', addr:'张家港市凤凰镇凤南路77号',     capacity:12, gridDate:'2023-09-25', monthlyHours:55.1, lng:120.628500, lat:31.789400 },
+        { id:'PV006', name:'周明华', addr:'张家港市金港镇长江中路201号',   capacity:30, gridDate:'2022-05-18', monthlyHours:33.6, lng:120.438720, lat:31.937550 },
+        { id:'PV007', name:'刘建国', addr:'张家港市乐余镇乐兴路15号',     capacity:18, gridDate:'2023-01-30', monthlyHours:45.3, lng:120.701400, lat:31.902100 },
+        { id:'PV008', name:'孙海涛', addr:'张家港市南丰镇南丰大道88号',   capacity:8,  gridDate:'2023-07-10', monthlyHours:57.9, lng:120.684300, lat:31.856700 },
+        { id:'PV009', name:'吴国平', addr:'张家港市常阴沙管理区红旗路9号', capacity:22, gridDate:'2022-10-05', monthlyHours:36.4, lng:120.758200, lat:31.838400 },
+        { id:'PV010', name:'郑伟强', addr:'张家港市大新镇沿江公路166号',   capacity:16, gridDate:'2023-04-22', monthlyHours:48.8, lng:120.535640, lat:31.991230 }
+    ]
+};
+
+// ===================================================================
+//  State
+// ===================================================================
+let models = [];
+let findingsMap = {}; // { modelId: [finding, ...] }
+let selectedModelId = null;
+let activeTab = 'model'; // 'model' | 'findings'
+
+// ===================================================================
+//  Init
+// ===================================================================
+function init() {
+    loadData();
+    renderModelList();
+    // Auto-select first model
+    if (models.length > 0) {
+        selectModel(models[0].id);
+    }
+}
+
+function loadData() {
+    try {
+        const savedModels = localStorage.getItem(STORAGE_KEY_MODELS);
+        models = savedModels ? JSON.parse(savedModels) : JSON.parse(JSON.stringify(DEFAULT_MODELS));
+    } catch(e) {
+        models = JSON.parse(JSON.stringify(DEFAULT_MODELS));
+    }
+    try {
+        const savedFindings = localStorage.getItem(STORAGE_KEY_FINDINGS);
+        findingsMap = savedFindings ? JSON.parse(savedFindings) : JSON.parse(JSON.stringify(DEFAULT_FINDINGS));
+    } catch(e) {
+        findingsMap = JSON.parse(JSON.stringify(DEFAULT_FINDINGS));
+    }
+}
+
+function saveData() {
+    localStorage.setItem(STORAGE_KEY_MODELS, JSON.stringify(models));
+    localStorage.setItem(STORAGE_KEY_FINDINGS, JSON.stringify(findingsMap));
+}
+
+// ===================================================================
+//  Toast
+// ===================================================================
+function showToast(msg, isError) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast' + (isError ? ' error' : '');
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ===================================================================
+//  Sidebar
+// ===================================================================
+function renderModelList() {
+    document.getElementById('modelCount').textContent = models.length;
+    const list = document.getElementById('modelList');
+    if (!models.length) {
+        list.innerHTML = '<div style="text-align:center;padding:24px;color:#484f58;font-size:0.8em">暂无模型<br>点击下方按钮创建</div>';
+        return;
+    }
+    // Group by category
+    const cats = {};
+    models.forEach(m => { if(!cats[m.category]) cats[m.category]=[]; cats[m.category].push(m); });
+    let html = '';
+    for (const [cat, catModels] of Object.entries(cats)) {
+        html += '<div style="color:#484f58;font-size:0.7em;padding:6px 8px 2px;text-transform:uppercase">' + cat + '</div>';
+        catModels.forEach(m => {
+            const fCount = (findingsMap[m.id] || []).length;
+            const act = m.id === selectedModelId ? ' active' : '';
+            html += '<div class="model-item' + act + '" onclick="selectModel(\'' + m.id + '\')" id="sidebar-' + m.id + '">' +
+                '<span class="icon">' + (m.icon || '📋') + '</span>' +
+                '<div class="info">' +
+                    '<div class="name">' + m.name + '</div>' +
+                    '<div class="cat">' + (m.category || '') + '</div>' +
+                    '<div class="count">疑点: ' + fCount + ' 条</div>' +
+                '</div>' +
+            '</div>';
+        });
+    }
+    list.innerHTML = html;
+}
+
+function selectModel(id) {
+    selectedModelId = id;
+    renderModelList();
+    renderContent();
+}
+
+// ===================================================================
+//  Content
+// ===================================================================
+function renderContent() {
+    if (!selectedModelId) {
+        document.getElementById('contentArea').innerHTML = '<div class="empty-state"><div class="icon">📋</div><p>选择一个模型进行编辑</p></div>';
+        return;
+    }
+    const m = models.find(x => x.id === selectedModelId);
+    if (!m) return;
+
+    const findings = findingsMap[selectedModelId] || [];
+    const fieldNames = (m.fields || '').split(',').map(s => s.trim()).filter(Boolean);
+
+    let html = '';
+
+    // Tabs
+    html += '<div class="tabs">';
+    html += '<div class="tab' + (activeTab === 'model' ? ' active' : '') + '" onclick="switchTab(\'model\')">📋 模型属性</div>';
+    html += '<div class="tab' + (activeTab === 'findings' ? ' active' : '') + '" onclick="switchTab(\'findings\')">⚠️ 疑点清单 <span style="font-size:0.8em;color:#58a6ff">(' + findings.length + ')</span></div>';
+    html += '</div>';
+
+    if (activeTab === 'model') {
+        // Model edit form
+        html += '<div class="form-row">';
+        html += '<div class="form-group"><label>模型ID（英文标识，不可修改）</label><input value="' + escHtml(m.id) + '" readonly style="color:#484f58;cursor:not-allowed"></div>';
+        html += '<div class="form-group"><label>图标 Emoji</label><input id="editIcon" value="' + escHtml(m.icon||'') + '" onchange="onModelFieldChange()"></div>';
+        html += '</div>';
+        html += '<div class="form-group"><label>模型名称</label><input id="editName" value="' + escHtml(m.name) + '" onchange="onModelFieldChange()"></div>';
+        html += '<div class="form-row">';
+        html += '<div class="form-group"><label>分类</label><input id="editCategory" value="' + escHtml(m.category||'') + '" onchange="onModelFieldChange()" placeholder="如：新能源审计、土地审计"></div>';
+        html += '</div>';
+        html += '<div class="form-group"><label>模型描述</label><textarea id="editDesc" onchange="onModelFieldChange()">' + escHtml(m.desc||'') + '</textarea></div>';
+        html += '<div class="form-group"><label>判定阈值 / 规则</label><input id="editThreshold" value="' + escHtml(m.threshold||'') + '" onchange="onModelFieldChange()" placeholder="如：月发电小时数 < 60小时"></div>';
+        html += '<div class="form-group"><label>疑点字段（逗号分隔，决定疑点表格有哪些列）</label><input id="editFields" value="' + escHtml(m.fields||'') + '" onchange="onModelFieldChange()" placeholder="如：户名,地址,并网容量(kW),并网时间,月均发电小时"></div>';
+        html += '<div class="help">💡 修改字段列表后，建议切换至「疑点清单」页签调整各条疑点的字段值。</div>';
+
+        // Delete model button
+        html += '<div style="margin-top:20px;padding-top:12px;border-top:1px solid #21262d">';
+        html += '<button class="btn-danger" onclick="deleteModel(\'' + m.id + '\')">🗑 删除此模型</button>';
+        html += '<span style="color:#8b949e;font-size:0.75em;margin-left:8px">删除模型将同时删除其下所有疑点数据</span>';
+        html += '</div>';
+    } else {
+        // Findings tab
+        html += '<div class="section-title">';
+        html += '<span>⚠️ 疑点清单</span>';
+        html += '<span class="badge" id="findingBadge">' + findings.length + '</span>';
+        html += '<div class="section-actions">';
+        html += '<button class="btn-normal" onclick="addFinding()">＋ 添加疑点</button>';
+        html += '<button class="btn-normal" onclick="importFindingsJSON()">📤 导入疑点JSON</button>';
+        html += '<button class="btn-normal" onclick="exportFindingsJSON()">📥 导出疑点JSON</button>';
+        html += '</div></div>';
+
+        if (findings.length === 0) {
+            html += '<div style="text-align:center;padding:40px;color:#484f58">暂无疑点数据<br><button class="btn-primary" style="margin-top:12px" onclick="addFinding()">＋ 添加第一条疑点</button></div>';
+        } else {
+            html += '<div class="table-wrap"><table><thead><tr>';
+            html += '<th style="width:30px">#</th>';
+            // Build columns from fields config
+            const cols = buildColumns(findings);
+            cols.forEach(col => { html += '<th>' + col + '</th>'; });
+            html += '<th style="width:80px">操作</th>';
+            html += '</tr></thead><tbody>';
+            findings.forEach((f, i) => {
+                html += '<tr id="findingRow-' + i + '" class="' + (editingFindingIdx === i ? 'selected' : '') + '">';
+                html += '<td style="color:#484f58">' + (i+1) + '</td>';
+                cols.forEach(col => {
+                    const val = f[col] != null ? f[col] : '';
+                    html += '<td><input class="cell-input' + (typeof val === 'number' ? ' num' : '') + '" value="' + escHtml(String(val)) + '" onchange="onFindingCellChange(' + i + ',\'' + col + '\',this.value)" data-col="' + col + '" data-row="' + i + '"></td>';
+                });
+                html += '<td class="actions-cell">';
+                html += '<button onclick="editFindingRow(' + i + ')" title="编辑整行">✏️</button>';
+                html += '<button class="danger" onclick="deleteFinding(' + i + ')" title="删除">🗑</button>';
+                html += '</td></tr>';
+            });
+            html += '</tbody></table></div>';
+            html += '<div class="help">💡 直接在表格中修改单元格数值，或点击 ✏️ 编辑完整行。修改后自动保存到本地存储。</div>';
+        }
+    }
+
+    document.getElementById('contentArea').innerHTML = html;
+}
+
+function switchTab(tab) {
+    activeTab = tab;
+    renderContent();
+}
+
+// ===================================================================
+//  Column inference from findings
+// ===================================================================
+function buildColumns(findings) {
+    const seen = new Set();
+    const cols = [];
+    // Mandatory columns first
+    ['id','name','addr','lng','lat'].forEach(c => { seen.add(c); cols.push(c); });
+    // Then from fields config
+    const m = models.find(x => x.id === selectedModelId);
+    if (m && m.fields) {
+        const fieldNames = m.fields.split(',').map(s => s.trim()).filter(Boolean);
+        // Map Chinese field names to keys
+        const fieldKeyMap = {
+            '户名':'name','地址':'addr','并网容量(kW)':'capacity','并网容量':'capacity',
+            '并网时间':'gridDate','月均发电小时':'monthlyHours','编号':'id',
+            '经度':'lng','纬度':'lat','容量':'capacity','月发电':'monthlyHours',
+            '电站名称':'name','装机容量(MW)':'capacity','占地类型':'landType','合规状态':'compliance',
+            '地块编号':'id','位置':'addr','占地面积(亩)':'area','原用途':'origUse','现用途':'curUse','变化年份':'changeYear',
+            '水体名称':'name','面积(km²)':'area','水质等级':'waterGrade','异常类型':'anomalyType','检测时间':'detectDate',
+            '区域名称':'name','变化面积(ha)':'area','NDVI变化量':'ndviChange','变化时间段':'changePeriod','疑似原因':'suspectedCause',
+            '项目名称':'name','规划面积(ha)':'planArea','实际面积(ha)':'actualArea','超出比例':'exceedRatio','发现时间':'detectDate',
+            '矿山名称':'name','矿权面积(ha)':'rightsArea','越界面积(ha)':'overArea','越界方向':'overDir',
+            '林班编号':'id','砍伐面积(ha)':'cutArea','审批面积(ha)':'approvedArea','差异面积(ha)':'diffArea',
+            '堆放点编号':'id','占地面积(m²)':'area','疑似类型':'suspectType','距离居民区(m)':'distToResident',
+            '岸段编号':'id','变化长度(m)':'changeLength','变化类型':'changeType','变化速率(m/年)':'changeRate','是否审批':'isApproved',
+            '坐标':'lat','位置坐标':'addr'
+        };
+        fieldNames.forEach(fn => {
+            const key = fieldKeyMap[fn] || fn;
+            if (!seen.has(key)) { seen.add(key); cols.push(key); }
+        });
+    }
+    // Then any other keys in findings
+    findings.forEach(f => {
+        Object.keys(f).forEach(k => {
+            if (!seen.has(k)) { seen.add(k); cols.push(k); }
+        });
+    });
+    // Move lng/lat to end
+    const preferred = ['id','name','addr','capacity','gridDate','monthlyHours'];
+    const ordered = [];
+    preferred.forEach(p => { if (cols.includes(p)) { ordered.push(p); seen.delete(p); } });
+    cols.forEach(c => { if (!preferred.includes(c)) ordered.push(c); });
+    return ordered;
+}
+
+// ===================================================================
+//  Model CRUD
+// ===================================================================
+function onModelFieldChange() {
+    if (!selectedModelId) return;
+    const m = models.find(x => x.id === selectedModelId);
+    if (!m) return;
+    m.icon = document.getElementById('editIcon')?.value || '';
+    m.name = document.getElementById('editName')?.value || '';
+    m.category = document.getElementById('editCategory')?.value || '';
+    m.desc = document.getElementById('editDesc')?.value || '';
+    m.threshold = document.getElementById('editThreshold')?.value || '';
+    m.fields = document.getElementById('editFields')?.value || '';
+    saveData();
+    renderModelList();
+}
+
+function addModel() {
+    const name = prompt('请输入新模型名称：', '新审计模型');
+    if (!name || !name.trim()) return;
+    const id = 'model_' + Date.now();
+    const m = {
+        id: id,
+        name: name.trim(),
+        icon: '📋',
+        category: '自定义',
+        desc: '',
+        fields: '编号,名称,地址,经度,纬度',
+        threshold: ''
+    };
+    models.push(m);
+    findingsMap[id] = [];
+    saveData();
+    selectedModelId = id;
+    activeTab = 'model';
+    renderModelList();
+    renderContent();
+    showToast('模型「' + name + '」已创建');
+}
+
+function deleteModel(id) {
+    const m = models.find(x => x.id === id);
+    if (!m) return;
+    const fCount = (findingsMap[id] || []).length;
+    const msg = fCount > 0
+        ? '确定删除模型「' + m.name + '」及其下 ' + fCount + ' 条疑点数据？此操作不可恢复。'
+        : '确定删除模型「' + m.name + '」？此操作不可恢复。';
+    if (!confirm(msg)) return;
+    models = models.filter(x => x.id !== id);
+    delete findingsMap[id];
+    saveData();
+    if (selectedModelId === id) {
+        selectedModelId = models.length > 0 ? models[0].id : null;
+        activeTab = 'model';
+    }
+    renderModelList();
+    if (selectedModelId) renderContent();
+    else document.getElementById('contentArea').innerHTML = '<div class="empty-state"><div class="icon">📋</div><p>选择一个模型进行编辑</p></div>';
+    showToast('模型「' + m.name + '」已删除');
+}
+
+// ===================================================================
+//  Finding CRUD
+// ===================================================================
+let editingFindingIdx = -1;
+
+function onFindingCellChange(rowIdx, col, value) {
+    const findings = findingsMap[selectedModelId] || [];
+    if (rowIdx < 0 || rowIdx >= findings.length) return;
+    // Try to parse as number
+    const numVal = parseFloat(value);
+    findings[rowIdx][col] = isNaN(numVal) ? value : numVal;
+    saveData();
+}
+
+function addFinding() {
+    const findings = findingsMap[selectedModelId] || [];
+    const m = models.find(x => x.id === selectedModelId);
+    const newId = 'F' + String(findings.length + 1).padStart(3, '0');
+    const newFinding = {
+        id: newId,
+        name: '新疑点' + (findings.length + 1),
+        addr: '请填写地址',
+        lng: 120.55 + (Math.random() - 0.5) * 0.2,
+        lat: 31.90 + (Math.random() - 0.5) * 0.1
+    };
+    // Add extra fields based on model fields config
+    if (m && m.fields) {
+        const fieldNames = m.fields.split(',').map(s => s.trim()).filter(Boolean);
+        if (fieldNames.some(f => f.includes('容量') || f.includes('kW'))) newFinding.capacity = 0;
+        if (fieldNames.some(f => f.includes('时间') || f.includes('日期'))) newFinding.gridDate = '2024-01-01';
+        if (fieldNames.some(f => f.includes('小时') || f.includes('发电'))) newFinding.monthlyHours = 0;
+        if (fieldNames.some(f => f.includes('面积'))) newFinding.area = 0;
+    }
+    findings.push(newFinding);
+    findingsMap[selectedModelId] = findings;
+    saveData();
+    renderContent();
+    renderModelList();
+    showToast('疑点「' + newId + '」已添加');
+}
+
+function deleteFinding(idx) {
+    const findings = findingsMap[selectedModelId] || [];
+    if (idx < 0 || idx >= findings.length) return;
+    const f = findings[idx];
+    if (!confirm('确定删除疑点「' + (f.name || f.id) + '」？')) return;
+    findings.splice(idx, 1);
+    saveData();
+    renderContent();
+    renderModelList();
+    showToast('疑点已删除');
+}
+
+let editFindingModal = null;
+function editFindingRow(idx) {
+    const findings = findingsMap[selectedModelId] || [];
+    if (idx < 0 || idx >= findings.length) return;
+    const f = findings[idx];
+    editingFindingIdx = idx;
+
+    // Build edit form
+    let formHtml = '<h3>✏️ 编辑疑点 #' + (idx + 1) + '</h3>';
+    Object.keys(f).forEach(k => {
+        const val = f[k] != null ? f[k] : '';
+        formHtml += '<div class="form-group"><label>' + k + '</label>';
+        formHtml += '<input id="modalField_' + k + '" value="' + escHtml(String(val)) + '" data-key="' + k + '">';
+        formHtml += '</div>';
+    });
+    formHtml += '<div class="btn-row">';
+    formHtml += '<button class="btn-normal" onclick="closeEditModal()">取消</button>';
+    formHtml += '<button class="btn-accent" onclick="saveEditModal(' + idx + ')">保存</button>';
+    formHtml += '</div>';
+
+    // Show modal
+    let overlay = document.getElementById('editModal');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'editModal';
+        overlay.className = 'modal-overlay';
+        document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = '<div class="modal">' + formHtml + '</div>';
+    overlay.style.display = 'flex';
+    editFindingModal = overlay;
+    // Close on overlay click
+    overlay.onclick = function(e) { if (e.target === overlay) closeEditModal(); };
+}
+
+function closeEditModal() {
+    if (editFindingModal) {
+        editFindingModal.style.display = 'none';
+        editFindingModal = null;
+    }
+    editingFindingIdx = -1;
+}
+
+function saveEditModal(idx) {
+    const findings = findingsMap[selectedModelId] || [];
+    if (idx < 0 || idx >= findings.length) return;
+    const f = findings[idx];
+    const inputs = document.querySelectorAll('#editModal input[data-key]');
+    inputs.forEach(inp => {
+        const key = inp.getAttribute('data-key');
+        const val = inp.value;
+        const numVal = parseFloat(val);
+        f[key] = isNaN(numVal) ? val : numVal;
+    });
+    saveData();
+    closeEditModal();
+    renderContent();
+    renderModelList();
+    showToast('疑点「' + (f.name || f.id) + '」已更新');
+}
+
+// ===================================================================
+//  Findings import/export
+// ===================================================================
+function exportFindingsJSON() {
+    const findings = findingsMap[selectedModelId] || [];
+    if (!findings.length) { showToast('当前模型无疑点数据', true); return; }
+    const m = models.find(x => x.id === selectedModelId);
+    const blob = new Blob([JSON.stringify(findings, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'findings_' + (m ? m.id : 'unknown') + '_' + new Date().toISOString().slice(0, 10) + '.json';
+    a.click();
+    showToast('疑点JSON已下载');
+}
+
+function importFindingsJSON() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            try {
+                const data = JSON.parse(ev.target.result);
+                if (!Array.isArray(data)) { showToast('JSON格式错误：需要数组', true); return; }
+                if (!data.length) { showToast('数组为空', true); return; }
+                // Merge or replace?
+                const action = confirm('点击"确定"替换当前疑点数据，点击"取消"追加到现有数据。');
+                if (action) {
+                    findingsMap[selectedModelId] = data;
+                } else {
+                    findingsMap[selectedModelId] = (findingsMap[selectedModelId] || []).concat(data);
+                }
+                saveData();
+                renderContent();
+                renderModelList();
+                showToast('已导入 ' + data.length + ' 条疑点');
+            } catch(ex) {
+                showToast('JSON解析失败: ' + ex.message, true);
+            }
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+}
+
+// ===================================================================
+//  Global import/export
+// ===================================================================
+function exportAll() {
+    const data = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        models: models,
+        findings: findingsMap
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'audit_models_findings_' + new Date().toISOString().slice(0, 10) + '.json';
+    a.click();
+    showToast('全部数据已导出（' + models.length + ' 个模型）');
+}
+
+function importAll(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+            if (!data.models || !Array.isArray(data.models)) { showToast('数据格式错误：缺少 models 数组', true); return; }
+            if (!data.findings || typeof data.findings !== 'object') { showToast('数据格式错误：缺少 findings 对象', true); return; }
+            if (!confirm('即将导入 ' + data.models.length + ' 个模型及对应疑点数据。\n\n此操作将覆盖当前所有数据，确定继续？')) return;
+            models = data.models;
+            findingsMap = data.findings;
+            saveData();
+            selectedModelId = models.length > 0 ? models[0].id : null;
+            activeTab = 'model';
+            renderModelList();
+            if (selectedModelId) renderContent();
+            else document.getElementById('contentArea').innerHTML = '<div class="empty-state"><div class="icon">📋</div><p>选择一个模型进行编辑</p></div>';
+            showToast('已导入 ' + data.models.length + ' 个模型');
+        } catch(ex) {
+            showToast('JSON解析失败: ' + ex.message, true);
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+}
+
+function resetToDefault() {
+    if (!confirm('确定恢复为默认数据？\n\n此操作将丢弃所有自定义修改！')) return;
+    models = JSON.parse(JSON.stringify(DEFAULT_MODELS));
+    findingsMap = JSON.parse(JSON.stringify(DEFAULT_FINDINGS));
+    saveData();
+    selectedModelId = models.length > 0 ? models[0].id : null;
+    activeTab = 'model';
+    renderModelList();
+    if (selectedModelId) renderContent();
+    showToast('已恢复默认数据');
+}
+
+// ===================================================================
+//  Utility
+// ===================================================================
+function escHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ===================================================================
+//  Keyboard shortcuts
+// ===================================================================
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 's') {
+        e.preventDefault();
+        saveData();
+        showToast('数据已保存');
+    }
+});
+
+// ===================================================================
+//  Startup
+// ===================================================================
+init();
+</script>
+</body>
+</html>

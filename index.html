@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数字化审计 — 卫星地图疑点核查系统</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:'Microsoft YaHei',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.container{text-align:center;max-width:520px;padding:40px 20px}
+h1{font-size:1.8em;color:#d2a8ff;margin-bottom:8px}
+.desc{color:#8b949e;font-size:0.9em;line-height:1.6;margin-bottom:32px}
+.cards{display:flex;flex-direction:column;gap:12px}
+.card{display:block;background:#161b22;border:1px solid #30363d;border-radius:10px;padding:20px 24px;text-decoration:none;color:#c9d1d9;text-align:left;transition:all 0.2s;display:flex;align-items:center;gap:16px}
+.card:hover{border-color:#58a6ff;transform:translateY(-2px);box-shadow:0 8px 24px rgba(88,166,255,0.1)}
+.card .icon{font-size:2em;min-width:48px;text-align:center}
+.card .info{flex:1}
+.card .info h3{font-size:1em;color:#e6edf3;margin-bottom:4px}
+.card .info p{font-size:0.78em;color:#8b949e;line-height:1.5}
+.card.primary{border-color:#7c3aed}
+.card.primary:hover{border-color:#a78bfa;box-shadow:0 8px 24px rgba(124,58,237,0.2)}
+.footer{margin-top:40px;font-size:0.72em;color:#484f58;line-height:1.6}
+.footer a{color:#58a6ff;text-decoration:none}
+.footer a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>🛰️ 卫星地图疑点核查系统</h1>
+    <p class="desc">数字化审计工具集 — 基于卫星影像的远程疑点核查与数据分析</p>
+
+    <div class="cards">
+        <a href="audit_tool.html" class="card primary">
+            <span class="icon">🗺️</span>
+            <div class="info">
+                <h3>疑点核查主工具</h3>
+                <p>卫星底图 + 审计模型 + 疑点定位 + 框选核查 + 提示词生成</p>
+            </div>
+        </a>
+        <a href="model_manager.html" class="card">
+            <span class="icon">⚙️</span>
+            <div class="info">
+                <h3>模型与疑点管理</h3>
+                <p>维护审计模型下拉框选项及各模型对应的疑点清单，支持 JSON 导入导出</p>
+            </div>
+        </a>
+        <a href="geovis_tool.html" class="card">
+            <span class="icon">🖼️</span>
+            <div class="info">
+                <h3>星图云历史影像工具</h3>
+                <p>多时相卫星影像对比查看，需星图云 Token</p>
+            </div>
+        </a>
+        <a href="sentinel2_viewer.html" class="card">
+            <span class="icon">🟢</span>
+            <div class="info">
+                <h3>Sentinel-2 影像查看器</h3>
+                <p>2017-2024 年度 Sentinel-2 卫星影像浏览（张家港区域）</p>
+            </div>
+        </a>
+    </div>
+
+    <div class="footer">
+        数据存储在浏览器本地 · 不同电脑互不影响 · 部署在 <a href="https://pages.github.com" target="_blank">GitHub Pages</a>
+    </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数字化审计 — 卫星地图疑点核查系统</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;height:100vh;display:flex;flex-direction:column}
+
+/* Token bar */
+.token-bar{background:#1a1a0e;padding:6px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #d2991d;font-size:0.8em}
+.token-bar span{color:#d2991d;white-space:nowrap}
+.token-bar input{flex:1;max-width:420px;background:#0d1117;color:#ffcc00;border:1px solid #d2991d;padding:5px 8px;border-radius:4px;font-family:monospace;font-size:0.85em}
+.token-bar button{background:#9a6700;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:0.8em}
+.token-bar .ok{background:#238636}
+
+/* Search bar */
+.search-bar{background:#161b22;padding:8px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid #30363d;position:relative}
+.search-bar input{flex:1;min-width:180px;max-width:300px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:6px 10px;border-radius:6px;font-size:0.85em}
+.search-bar input:focus{border-color:#58a6ff;outline:none}
+.search-bar select{background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:6px 10px;border-radius:6px;font-size:0.82em;cursor:pointer}
+.search-bar select:focus{border-color:#58a6ff;outline:none}
+.search-bar button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.8em;white-space:nowrap}
+.search-bar button:hover{background:#30363d}
+.search-bar .accent{background:#238636;border-color:#238636;color:#fff}
+.search-bar .warn{background:#9a6700;border-color:#9a6700;color:#fff}
+.search-bar .audit-accent{background:#7c3aed;border-color:#7c3aed;color:#fff}
+.search-bar .sep{width:1px;height:20px;background:#30363d;margin:0 2px}
+.search-bar .badge{font-size:0.7em;padding:2px 8px;border-radius:10px;background:#1f3a5f;color:#58a6ff;white-space:nowrap}
+
+#searchResults{position:absolute;top:100%;left:0;right:0;background:#161b22;border:1px solid #30363d;border-radius:0 0 6px 6px;z-index:9999;max-height:350px;overflow-y:auto;display:none}
+#searchResults .item{padding:10px 12px;cursor:pointer;border-bottom:1px solid #21262d;color:#c9d1d9;font-size:0.82em}
+#searchResults .item:hover{background:#1f2a3a}
+#searchResults .item.highlight{border-left:3px solid #3fb950;background:#1a2e1a}
+#searchResults .item .name{color:#58a6ff;font-weight:bold}
+
+/* Main layout */
+.main{display:flex;flex:1;overflow:hidden}
+#mapContainer{flex:1;position:relative}
+#map{width:100%;height:100%}
+.map-status{position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,0.8);color:#7ee787;padding:4px 10px;border-radius:4px;font-family:monospace;font-size:0.7em;z-index:999;pointer-events:none}
+
+/* Panel */
+.panel{width:390px;background:#161b22;border-left:1px solid #30363d;overflow-y:auto;font-size:0.8em}
+.panel-section{padding:12px 14px;border-bottom:1px solid #30363d}
+.panel-section h3{color:#d2a8ff;font-size:0.88em;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.panel-section h3 .count{font-size:0.75em;background:#7c3aed;color:#fff;padding:2px 8px;border-radius:10px}
+.panel-section label{display:block;color:#8b949e;font-size:0.72em;margin:4px 0 2px}
+.panel-section input,.panel-section select{width:100%;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:5px 8px;border-radius:4px;font-family:monospace;font-size:0.82em}
+.panel-section textarea{width:100%;background:#0d1117;color:#7ee787;border:1px solid #30363d;padding:8px;border-radius:4px;font-family:monospace;font-size:0.78em;resize:vertical;line-height:1.5}
+.row{display:flex;gap:6px}.row input{flex:1}
+.coord-box{background:#0d1117;padding:8px;border-radius:4px;font-family:monospace;font-size:0.75em;line-height:1.7;color:#7ee787;word-break:break-all}
+.btn-full{width:100%;padding:7px;margin:2px 0;border-radius:6px;cursor:pointer;font-size:0.82em;border:1px solid #30363d;text-align:center}
+.btn-full.accent{background:#238636;border-color:#238636;color:#fff}
+.btn-full.normal{background:#21262d;color:#c9d1d9}
+.btn-full.warn{background:#9a6700;border-color:#9a6700;color:#fff}
+.btn-full.audit{background:#7c3aed;border-color:#7c3aed;color:#fff}
+
+/* Finding list */
+.finding-list{max-height:320px;overflow-y:auto}
+.finding-item{padding:8px 10px;margin:4px 0;background:#0d1117;border:1px solid #21262d;border-radius:6px;cursor:pointer;transition:all 0.15s;font-size:0.78em}
+.finding-item:hover{border-color:#58a6ff;background:#161b22}
+.finding-item.active{border-color:#7c3aed;background:#1a1630;box-shadow:0 0 8px rgba(124,58,237,0.2)}
+.finding-item .f-name{color:#e6edf3;font-weight:bold;margin-bottom:2px}
+.finding-item .f-addr{color:#8b949e;font-size:0.85em}
+.finding-item .f-meta{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap}
+.finding-item .f-meta span{font-size:0.8em;padding:2px 6px;border-radius:3px}
+.finding-item .f-meta .tag-hours{background:#3a1f1f;color:#ff7b72}
+.finding-item .f-meta .tag-cap{background:#1f2a1f;color:#7ee787}
+.finding-item .f-meta .tag-date{background:#1f2a3a;color:#79c0ff}
+.finding-item .f-idx{color:#484f58;font-size:0.75em;float:right}
+
+/* Prompt box */
+.prompt-box{background:#0d1117;border:1px solid #7c3aed;border-radius:6px;padding:10px;margin-top:8px;font-family:monospace;font-size:0.75em;line-height:1.6;color:#c9d1d9;max-height:200px;overflow-y:auto;display:none}
+.prompt-box.show{display:block}
+
+/* Model info */
+.model-info{background:#1a1630;border:1px solid #7c3aed;padding:8px 10px;border-radius:4px;font-size:0.75em;color:#c9d1d9;line-height:1.5;display:none}
+.model-info.show{display:block}
+.model-info .m-name{color:#d2a8ff;font-weight:bold}
+
+/* Finding markers */
+.finding-marker .dot{width:10px;height:10px;border-radius:50%;background:#ff7b72;border:2px solid #fff;box-shadow:0 0 6px rgba(255,123,114,0.6)}
+.finding-marker.active .dot{background:#7c3aed;box-shadow:0 0 10px rgba(124,58,237,0.8);width:14px;height:14px}
+
+/* Toast */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;padding:10px 24px;border-radius:8px;font-size:0.85em;z-index:99999;opacity:0;transition:opacity 0.3s;pointer-events:none}
+.toast.show{opacity:1}
+
+/* Data mgmt */
+.data-mgmt{display:none;margin-top:6px}
+.data-mgmt.show{display:block}
+.data-mgmt textarea{width:100%;background:#0d1117;color:#7ee787;border:1px solid #30363d;padding:8px;border-radius:4px;font-family:monospace;font-size:0.72em;resize:vertical;height:120px;line-height:1.5}
+</style>
+</head>
+<body>
+
+<!-- Token -->
+<div class="token-bar">
+    <span>🔑 Token:</span>
+    <input id="tokenInput" type="text" placeholder="输入星图云 API Token（可选，不影响核心功能）">
+    <button id="tokenBtn" onclick="saveToken()">保存</button>
+    <span id="tokenStatus" style="font-size:0.8em;color:#8b949e">未设置</span>
+    <span style="flex:1"></span>
+    <span style="color:#8b949e;font-size:0.75em">历史年份:</span>
+    <select id="activeYearSelect" onchange="switchActiveYear()" style="background:#0d1117;color:#58a6ff;border:1px solid #30363d;padding:4px 8px;border-radius:4px;font-size:0.8em">
+        <option value="current">当前影像 (0.5m)</option>
+    </select>
+</div>
+
+<!-- Search bar -->
+<div class="search-bar">
+    <span class="badge">🔍 数字化审计</span>
+    <span class="sep"></span>
+    <label style="color:#d2a8ff;font-size:0.8em;white-space:nowrap">📋 审计模型:</label>
+    <select id="auditModelSelect" onchange="onAuditModelChange()" style="min-width:220px">
+        <option value="">-- 请选择审计模型 --</option>
+    </select>
+    <span class="sep"></span>
+    <button class="audit-accent" onclick="loadFindings()" id="loadBtn" disabled>▶ 加载疑点</button>
+    <span class="sep"></span>
+    <button class="btn-normal" onclick="window.open('model_manager.html','_blank')" style="background:#1f3a5f;border-color:#58a6ff;color:#58a6ff" title="管理审计模型和疑点数据">⚙️ 模型管理</button>
+    <span class="sep"></span>
+    <input id="searchInput" type="text" placeholder="搜地址/企业/坐标" onkeydown="if(event.key==='Enter')doSearch()">
+    <button onclick="doSearch()">🔍</button>
+    <button onclick="startDrawRect()" id="drawBtn">▢ 框选</button>
+    <span class="sep"></span>
+    <button class="warn" onclick="queryHistory()" id="historyBtn">🕐 历史影像</button>
+    <span id="searchStatus" style="color:#8b949e;font-size:0.75em"></span>
+    <div id="searchResults"></div>
+</div>
+
+<!-- Main -->
+<div class="main">
+    <div id="mapContainer">
+        <div id="map"></div>
+        <div class="map-status" id="mapStatus">就绪 | 高德卫星底图（免费）| 请选择审计模型</div>
+    </div>
+
+    <div class="panel">
+        <!-- Audit Model Info -->
+        <div class="panel-section">
+            <h3>📋 当前审计模型</h3>
+            <div class="model-info" id="modelInfo">
+                <span class="m-name"></span><br>
+                <span id="modelDesc"></span>
+            </div>
+            <div style="color:#8b949e;font-size:0.78em;margin-top:4px" id="modelEmpty">未选择审计模型 — 请在上方下拉框中选择</div>
+        </div>
+
+        <!-- Finding List -->
+        <div class="panel-section" id="findingPanel" style="display:none">
+            <h3>⚠️ 疑点清单 <span class="count" id="findingCount">0</span></h3>
+            <div class="finding-list" id="findingList"></div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+                <button class="btn-full normal" style="flex:1" onclick="locateAllFindings()">📍 全部定位</button>
+                <button class="btn-full normal" style="flex:1" onclick="clearFindingMarkers()">🗑 清除标记</button>
+            </div>
+        </div>
+
+        <!-- Selected Finding Detail -->
+        <div class="panel-section" id="findingDetail" style="display:none">
+            <h3>📌 当前疑点详情</h3>
+            <div class="coord-box" id="findingDetailContent"></div>
+            <button class="btn-full audit" style="margin-top:6px" onclick="locateFinding()">📍 定位此疑点</button>
+        </div>
+
+        <!-- Position -->
+        <div class="panel-section">
+            <h3>📍 当前位置</h3>
+            <div class="coord-box" id="currentPos">120.5489250, 31.9750790 (WGS-84)<br>永凝路区域，张家港市大新镇</div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+                <button class="btn-full normal" style="flex:1" onclick="copyCoord()">📋 复制WGS-84</button>
+                <button class="btn-full normal" style="flex:1" onclick="reverseGeocode()">🔄 坐标→地址</button>
+            </div>
+        </div>
+
+        <!-- Area selection & Prompt -->
+        <div class="panel-section">
+            <h3>📐 框选核查区域</h3>
+            <div class="coord-box" id="areaInfo">未框选 — 点击上方 ▢ 框选 按钮</div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+                <button class="btn-full normal" style="flex:1" onclick="clearArea()">清除框选</button>
+                <button class="btn-full accent" style="flex:1" onclick="exportArea()">导出GeoJSON</button>
+            </div>
+            <button class="btn-full audit" style="margin-top:4px" onclick="generatePrompt()" id="promptBtn">🤖 生成核查提示词</button>
+        </div>
+
+        <!-- Generated Prompt -->
+        <div class="panel-section" id="promptPanel" style="display:none">
+            <h3>💬 核查提示词</h3>
+            <div class="prompt-box show" id="promptContent"></div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+                <button class="btn-full normal" style="flex:1" onclick="copyPrompt()">📋 复制提示词</button>
+                <button class="btn-full warn" style="flex:1" onclick="queryHistory()">🕐 查询历史影像</button>
+            </div>
+        </div>
+
+        <!-- Tools -->
+        <div class="panel-section">
+            <h3>🔧 工具</h3>
+            <div style="display:flex;gap:4px;align-items:center;margin-bottom:6px">
+                <button class="btn-full normal" style="flex:1" onclick="mapZoom(-1)">🔍-</button>
+                <span style="color:#c9d1d9;min-width:24px;text-align:center" id="zoomLabel">17</span>
+                <button class="btn-full normal" style="flex:1" onclick="mapZoom(1)">🔍+</button>
+            </div>
+            <button class="btn-full normal" onclick="toggleCircle()" id="circleBtn">⭕ 100m圈(显示)</button>
+            <button class="btn-full normal" onclick="toggleMeasure()" id="measureBtn">📏 测距</button>
+            <button class="btn-full accent" onclick="captureMap()">📸 截图保存</button>
+        </div>
+
+        <!-- Basemap -->
+        <div class="panel-section">
+            <h3>🛰️ 底图</h3>
+            <select id="basemapSelect" onchange="setBasemap(this.value)" style="width:100%">
+                <option value="amap">高德卫星图 (免费，推荐)</option>
+                <option value="esri">Esri 卫星图 (免费，全球)</option>
+                <option value="geovis">星图云当前影像 (需Token)</option>
+            </select>
+        </div>
+
+        <!-- Data Management -->
+        <div class="panel-section">
+            <h3>📦 疑点数据管理</h3>
+            <button class="btn-full normal" onclick="toggleDataMgmt()" id="dataMgmtBtn">📂 展开数据编辑 / 导入导出</button>
+            <div class="data-mgmt" id="dataMgmt">
+                <label>JSON 数据（编辑后点击"应用"生效）</label>
+                <textarea id="dataJsonEditor" placeholder='[{"id":"XX","name":"...","addr":"...","lng":...,"lat":...,...}]'></textarea>
+                <div style="display:flex;gap:6px;margin-top:6px">
+                    <button class="btn-full accent" style="flex:1" onclick="applyEditedData()">✅ 应用</button>
+                    <button class="btn-full normal" style="flex:1" onclick="exportDataJSON()">📥 下载JSON</button>
+                    <button class="btn-full normal" style="flex:1" onclick="document.getElementById('dataFileInput').click()">📤 导入JSON</button>
+                </div>
+                <input type="file" id="dataFileInput" accept=".json" style="display:none" onchange="importDataJSON(event)">
+                <div style="display:flex;gap:6px;margin-top:4px">
+                    <button class="btn-full normal" style="flex:1;font-size:0.72em" onclick="resetDemoData()">🔄 恢复演示数据</button>
+                </div>
+                <div style="color:#8b949e;font-size:0.68em;margin-top:6px;line-height:1.5">
+                    <b>字段说明：</b>id(编号) name(户名) addr(地址) capacity(容量kW) gridDate(并网日期YYYY-MM-DD) monthlyHours(月均发电小时) lng(经度WGS-84) lat(纬度WGS-84)
+                </div>
+            </div>
+        </div>
+
+        <!-- Manual -->
+        <div class="panel-section" id="manualPanel" style="display:none">
+            <h3>📍 手动坐标</h3>
+            <div class="row"><input id="mLng" placeholder="WGS-84经度"><input id="mLat" placeholder="WGS-84纬度"></div>
+            <button class="btn-full accent" style="margin-top:4px" onclick="goManual()">定位</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+
+<script>
+// ===================================================================
+//  一、审计模型定义 — 优先从 localStorage 读取，支持通过 model_manager.html 管理
+// ===================================================================
+const DEFAULT_AUDIT_MODELS = [
+    { id:'pv_hours_anomaly',    name:'光伏发电小时异常模型',  icon:'☀️', category:'新能源审计',
+      desc:'识别月均发电小时数低于60小时的分布式光伏用户，排查发电异常、设备故障或虚报并网容量。',
+      fields:'户名,地址,并网容量(kW),并网时间,月均发电小时', threshold:'月发电小时数 < 60小时' },
+    { id:'pv_siting_compliance', name:'光伏电站选址合规模型', icon:'🏗️', category:'新能源审计',
+      desc:'核查光伏电站是否建设在基本农田、生态红线、自然保护区等禁止建设区域。',
+      fields:'电站名称,地址,装机容量(MW),占地类型,合规状态', threshold:'占地类型 ∈ [基本农田,生态红线,自然保护区]' },
+    { id:'farmland_occupation',  name:'耕地占用检测模型',      icon:'🌾', category:'土地审计',
+      desc:'通过卫星影像对比分析，识别新增建设用地是否占用基本农田或耕地。',
+      fields:'地块编号,位置,占地面积(亩),原用途,现用途,变化年份', threshold:'耕地→非农建设 且 未经审批' },
+    { id:'water_pollution',      name:'水体污染遥感模型',      icon:'💧', category:'环保审计',
+      desc:'利用多光谱遥感数据分析水体颜色异常、富营养化、悬浮物浓度变化。',
+      fields:'水体名称,位置,面积(km²),水质等级,异常类型,检测时间', threshold:'NDWI异常 或 叶绿素a浓度 > 50μg/L' },
+    { id:'vegetation_change',    name:'植被覆盖变化模型',      icon:'🌿', category:'生态审计',
+      desc:'基于NDVI时序分析，检测植被覆盖显著减少区域。',
+      fields:'区域名称,位置,变化面积(ha),NDVI变化量,变化时间段,疑似原因', threshold:'NDVI下降 > 0.3 且 面积 > 1ha' },
+    { id:'construction_expansion',name:'建设用地扩张模型',     icon:'🏢', category:'土地审计',
+      desc:'监测城市/工业园区建设用地边界变化，核查超规划范围建设。',
+      fields:'项目名称,位置,规划面积(ha),实际面积(ha),超出比例,发现时间', threshold:'实际面积 > 规划面积 × 1.1' },
+    { id:'mining_boundary',      name:'矿山越界开采模型',      icon:'⛏️', category:'矿产审计',
+      desc:'对比采矿权边界与实际开采面，识别越界开采行为。',
+      fields:'矿山名称,位置,矿权面积(ha),越界面积(ha),越界方向,检测时间', threshold:'开采面超出矿权边界' },
+    { id:'deforestation',        name:'森林砍伐检测模型',      icon:'🌲', category:'林业审计',
+      desc:'利用高分辨率卫星影像检测森林覆盖减少，区分合法采伐与非法砍伐。',
+      fields:'林班编号,位置,砍伐面积(ha),审批面积(ha),差异面积(ha),检测时间', threshold:'实际砍伐 > 审批面积' },
+    { id:'solid_waste',          name:'固废违规堆放模型',      icon:'🗑️', category:'环保审计',
+      desc:'通过影像纹理和光谱特征识别疑似固废堆放点。',
+      fields:'堆放点编号,位置,占地面积(m²),疑似类型,距离居民区(m),发现时间', threshold:'非规划场地 且 面积 > 500m²' },
+    { id:'coastline_change',     name:'海岸线变化监测模型',    icon:'🌊', category:'海洋审计',
+      desc:'提取历年海岸线位置，识别侵蚀/淤积变化，核查围填海项目审批合规性。',
+      fields:'岸段编号,位置,变化长度(m),变化类型,变化速率(m/年),是否审批', threshold:'围填海 且 未经审批' }
+];
+
+// 从 localStorage 加载模型（优先用户自定义），fallback 到默认
+function loadAuditModels() {
+    try {
+        const saved = localStorage.getItem('audit_tool_models');
+        if (saved) {
+            const arr = JSON.parse(saved);
+            if (Array.isArray(arr) && arr.length > 0) return arr;
+        }
+    } catch(e) {}
+    return JSON.parse(JSON.stringify(DEFAULT_AUDIT_MODELS));
+}
+const AUDIT_MODELS = loadAuditModels();
+
+// ===================================================================
+//  二、疑点数据 — 优先从 localStorage 读取（通过 model_manager.html 管理）
+//     每个疑点必须包含的字段（光伏发电小时异常模型）：
+//     id, name, addr, capacity, gridDate, monthlyHours, lng, lat
+//     lng/lat 使用 WGS-84 坐标系
+// ===================================================================
+const DEFAULT_DEMO_FINDINGS = [
+    { id:'PV001', name:'张永福', addr:'张家港市大新镇永凝路218号',    capacity:15, gridDate:'2023-06-15', monthlyHours:42.5, lng:120.548925, lat:31.975079 },
+    { id:'PV002', name:'李建明', addr:'张家港市锦丰镇锦南路56号',     capacity:20, gridDate:'2022-11-20', monthlyHours:38.2, lng:120.619830, lat:31.962410 },
+    { id:'PV003', name:'王德发', addr:'张家港市杨舍镇沙洲西路128号',   capacity:10, gridDate:'2023-03-08', monthlyHours:51.7, lng:120.538240, lat:31.873850 },
+    { id:'PV004', name:'陈志强', addr:'张家港市塘桥镇北京路33号',     capacity:25, gridDate:'2022-08-12', monthlyHours:29.8, lng:120.652100, lat:31.824300 },
+    { id:'PV005', name:'赵永刚', addr:'张家港市凤凰镇凤南路77号',     capacity:12, gridDate:'2023-09-25', monthlyHours:55.1, lng:120.628500, lat:31.789400 },
+    { id:'PV006', name:'周明华', addr:'张家港市金港镇长江中路201号',   capacity:30, gridDate:'2022-05-18', monthlyHours:33.6, lng:120.438720, lat:31.937550 },
+    { id:'PV007', name:'刘建国', addr:'张家港市乐余镇乐兴路15号',     capacity:18, gridDate:'2023-01-30', monthlyHours:45.3, lng:120.701400, lat:31.902100 },
+    { id:'PV008', name:'孙海涛', addr:'张家港市南丰镇南丰大道88号',   capacity:8,  gridDate:'2023-07-10', monthlyHours:57.9, lng:120.684300, lat:31.856700 },
+    { id:'PV009', name:'吴国平', addr:'张家港市常阴沙管理区红旗路9号', capacity:22, gridDate:'2022-10-05', monthlyHours:36.4, lng:120.758200, lat:31.838400 },
+    { id:'PV010', name:'郑伟强', addr:'张家港市大新镇沿江公路166号',   capacity:16, gridDate:'2023-04-22', monthlyHours:48.8, lng:120.535640, lat:31.991230 }
+];
+
+// 从 localStorage 加载所有模型的疑点数据
+function loadAllFindings() {
+    try {
+        const saved = localStorage.getItem('audit_tool_findings');
+        if (saved) {
+            const obj = JSON.parse(saved);
+            if (typeof obj === 'object' && !Array.isArray(obj)) return obj;
+        }
+    } catch(e) {}
+    return {};
+}
+
+// ===================================================================
+//  三、坐标转换工具 (WGS-84 ↔ GCJ-02 ↔ BD-09)
+// ===================================================================
+const PI=Math.PI, AX=6378245, EE=0.00669342162296594323;
+function _tLat(x,y){let r=-100+2*x+3*y+0.2*y*y+0.1*x*y+0.2*Math.sqrt(Math.abs(x));r+=(20*Math.sin(6*x*PI)+20*Math.sin(2*x*PI))*2/3;r+=(20*Math.sin(y*PI)+40*Math.sin(y/3*PI))*2/3;r+=(160*Math.sin(y/12*PI)+320*Math.sin(y*PI/30))*2/3;return r}
+function _tLon(x,y){let r=300+x+2*y+0.1*x*x+0.1*x*y+0.1*Math.sqrt(Math.abs(x));r+=(20*Math.sin(6*x*PI)+20*Math.sin(2*x*PI))*2/3;r+=(20*Math.sin(x*PI)+40*Math.sin(x/3*PI))*2/3;r+=(150*Math.sin(x/12*PI)+300*Math.sin(x/30*PI))*2/3;return r}
+function wgs2gcj(lng,lat){const dLat=_tLat(lng-105,lat-35),dLon=_tLon(lng-105,lat-35);const r=lat/180*PI;const m=1-EE*Math.sin(r)*Math.sin(r);const s=Math.sqrt(m);return{lng:lng+(dLon*180)/(AX/s*Math.cos(r)*PI),lat:lat+(dLat*180)/((AX*(1-EE))/(m*s)*PI)}}
+function gcj2wgs(lng,lat){let w={lng,lat};for(let i=0;i<5;i++){const t=wgs2gcj(w.lng,w.lat);w.lng+=lng-t.lng;w.lat+=lat-t.lat}return w}
+function gcj2bd(lng,lat){const z=Math.sqrt(lng*lng+lat*lat)+0.00002*Math.sin(lat*PI*3000/180);const th=Math.atan2(lat,lng)+0.000003*Math.cos(lng*PI*3000/180);return{lng:z*Math.cos(th)+0.0065,lat:z*Math.sin(th)+0.006}}
+function toMap(lng,lat){const gcj=wgs2gcj(lng,lat);return[gcj.lat,gcj.lng]}
+function fromMap(lat,lng){return gcj2wgs(lng,lat)}
+
+// ===================================================================
+//  四、全局状态
+// ===================================================================
+let TOKEN = '';
+let currentWgs = { lng: 120.548925, lat: 31.975079 };
+let activeYear = 'current';
+let historyData = {}, historyLayer = null;
+let currentAuditModel = null;
+let currentFindings = [];
+let selectedFindingIdx = -1;
+let findingMarkers = [];
+let circle100m = null, circleShown = true;
+let measurePoints = [], measureLines = [], measuring = false;
+
+// ===================================================================
+//  五、Toast
+// ===================================================================
+function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ===================================================================
+//  六、底图图层 (全部免费CDN，无需API Key)
+// ===================================================================
+const amapSat = L.tileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', {
+    subdomains: ['1','2','3','4'], maxNativeZoom: 18, maxZoom: 20, attribution: '高德卫星图'
+});
+const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: 'Esri World Imagery'
+});
+let geovisCurrentLayer = null;
+function initGeovisCurrent() {
+    if (!TOKEN) return;
+    if (geovisCurrentLayer) map.removeLayer(geovisCurrentLayer);
+    geovisCurrentLayer = L.tileLayer('https://api.open.geovisearth.com/pj/base/v1/img/{z}/{x}/{y}?format=webp&tmsIds=w&token=' + TOKEN, {
+        maxNativeZoom: 18, maxZoom: 20, attribution: '星图云 当前 | 0.5m'
+    });
+}
+function setBasemap(type) {
+    [amapSat, esriSat].forEach(l => map.removeLayer(l));
+    if (geovisCurrentLayer) map.removeLayer(geovisCurrentLayer);
+    if (type === 'geovis' && TOKEN) { initGeovisCurrent(); geovisCurrentLayer.addTo(map); }
+    else if (type === 'esri') esriSat.addTo(map);
+    else amapSat.addTo(map);
+}
+
+// ===================================================================
+//  七、地图初始化
+// ===================================================================
+const map = L.map('map', {
+    center: toMap(currentWgs.lng, currentWgs.lat),
+    zoom: 17, layers: [amapSat], zoomControl: false
+});
+const centerMarker = L.circleMarker([0,0], {radius:8,color:'#ff0000',fillColor:'#ff0000',fillOpacity:0.6,weight:2}).addTo(map);
+
+function updateMarker() {
+    const ll = toMap(currentWgs.lng, currentWgs.lat);
+    centerMarker.setLatLng(ll);
+    if (circleShown) {
+        if (circle100m) map.removeLayer(circle100m);
+        circle100m = L.circle(ll, {radius:100,color:'#ff8800',weight:2,fill:false,dashArray:'8,4',opacity:0.7}).addTo(map);
+    }
+    map.setView(ll, map.getZoom());
+}
+function updatePosDisplay() {
+    const gcj = wgs2gcj(currentWgs.lng, currentWgs.lat);
+    const bd = gcj2bd(gcj.lng, gcj.lat);
+    document.getElementById('currentPos').innerHTML =
+        '<b>WGS-84:</b> ' + currentWgs.lng.toFixed(7) + ', ' + currentWgs.lat.toFixed(7) + '<br>' +
+        '<b>GCJ-02:</b> ' + gcj.lng.toFixed(7) + ', ' + gcj.lat.toFixed(7) + '<br>' +
+        '<b>BD-09:</b> ' + bd.lng.toFixed(7) + ', ' + bd.lat.toFixed(7);
+}
+map.on('click', function(e) {
+    if (measuring) { addMeasurePoint(e.latlng); return; }
+    currentWgs = fromMap(e.latlng.lat, e.latlng.lng);
+    updateMarker(); updatePosDisplay(); updateMapStatus();
+});
+map.on('mousemove', function(e) {
+    const wgs = fromMap(e.latlng.lat, e.latlng.lng);
+    document.getElementById('mapStatus').textContent =
+        (activeYear==='current'?'当前':activeYear) + ' | ' + wgs.lng.toFixed(6)+', '+wgs.lat.toFixed(6)+' (WGS-84) | z'+map.getZoom();
+});
+map.on('zoomend', ()=>{ document.getElementById('zoomLabel').textContent=map.getZoom(); updateMapStatus(); });
+function updateMapStatus() {
+    document.getElementById('mapStatus').textContent =
+        (activeYear==='current'?'当前':activeYear)+' | '+currentWgs.lng.toFixed(6)+', '+currentWgs.lat.toFixed(6)+' (WGS-84) | z'+map.getZoom()+
+        (currentAuditModel?' | 模型: '+currentAuditModel.name:'')+(currentFindings.length>0?' | 疑点: '+currentFindings.length+'条':'');
+}
+
+// ===================================================================
+//  八、审计模型选择
+// ===================================================================
+function initAuditModelSelect() {
+    const sel = document.getElementById('auditModelSelect');
+    const cats = {};
+    AUDIT_MODELS.forEach(m => { if(!cats[m.category]) cats[m.category]=[]; cats[m.category].push(m); });
+    for(const [cat,models] of Object.entries(cats)) {
+        const og = document.createElement('optgroup'); og.label = cat;
+        models.forEach(m => { const o=document.createElement('option'); o.value=m.id; o.textContent=m.icon+' '+m.name; og.appendChild(o); });
+        sel.appendChild(og);
+    }
+}
+function onAuditModelChange() {
+    const id = document.getElementById('auditModelSelect').value;
+    if(!id) { currentAuditModel=null; document.getElementById('loadBtn').disabled=true; document.getElementById('modelInfo').classList.remove('show'); document.getElementById('modelEmpty').style.display='block'; document.getElementById('findingPanel').style.display='none'; document.getElementById('findingDetail').style.display='none'; document.getElementById('promptPanel').style.display='none'; clearFindingMarkers(); return; }
+    currentAuditModel = AUDIT_MODELS.find(m=>m.id===id);
+    document.getElementById('loadBtn').disabled=false;
+    document.getElementById('modelEmpty').style.display='none';
+    document.getElementById('modelInfo').classList.add('show');
+    document.getElementById('modelInfo').querySelector('.m-name').textContent = currentAuditModel.icon+' '+currentAuditModel.name;
+    document.getElementById('modelDesc').textContent = currentAuditModel.desc;
+    loadFindings();
+}
+
+// ===================================================================
+//  九、疑点数据生成 & 管理
+// ===================================================================
+function generateFindings(modelId) {
+    // 1. Try localStorage first
+    const allFindings = loadAllFindings();
+    if (allFindings[modelId] && Array.isArray(allFindings[modelId]) && allFindings[modelId].length > 0) {
+        return JSON.parse(JSON.stringify(allFindings[modelId]));
+    }
+    // 2. Fallback to default demo data for pv_hours_anomaly
+    if (modelId === 'pv_hours_anomaly') return JSON.parse(JSON.stringify(DEFAULT_DEMO_FINDINGS));
+    // 3. Auto-generate random data for other models
+    const base = [
+        {lng:120.548925,lat:31.975079,town:'大新镇'},{lng:120.619830,lat:31.962410,town:'锦丰镇'},
+        {lng:120.538240,lat:31.873850,town:'杨舍镇'},{lng:120.652100,lat:31.824300,town:'塘桥镇'},
+        {lng:120.628500,lat:31.789400,town:'凤凰镇'},{lng:120.438720,lat:31.937550,town:'金港镇'},
+        {lng:120.701400,lat:31.902100,town:'乐余镇'},{lng:120.684300,lat:31.856700,town:'南丰镇'},
+        {lng:120.758200,lat:31.838400,town:'常阴沙'},{lng:120.535640,lat:31.991230,town:'沿江路'}
+    ];
+    return base.map((c,i) => ({
+        id: (modelId.replace(/[^a-z]/g,'')+(i+1)).toUpperCase().substring(0,8),
+        name: '疑点'+(i+1),
+        addr: '张家港市'+c.town+'某某地址'+(i+1),
+        lng: c.lng+(Math.random()-0.5)*0.02,
+        lat: c.lat+(Math.random()-0.5)*0.02,
+        capacity: Math.floor(Math.random()*50+5),
+        gridDate: '202'+(Math.floor(Math.random()*4+1))+'-'+String(Math.floor(Math.random()*12+1)).padStart(2,'0')+'-'+String(Math.floor(Math.random()*28+1)).padStart(2,'0'),
+        monthlyHours: Math.round(Math.random()*100*10)/10
+    }));
+}
+
+function loadFindings() {
+    if (!currentAuditModel) { showToast('请先选择审计模型'); return; }
+    const modelId = document.getElementById('auditModelSelect').value;
+    if (!modelId) return;
+    currentFindings = generateFindings(modelId);
+    selectedFindingIdx = -1;
+    document.getElementById('findingDetail').style.display='none';
+    document.getElementById('promptPanel').style.display='none';
+    clearFindingMarkers();
+    renderFindingList();
+    document.getElementById('findingPanel').style.display='block';
+    showToast('已加载 '+currentFindings.length+' 条疑点');
+    locateAllFindings();
+}
+
+function renderFindingList() {
+    document.getElementById('findingCount').textContent = currentFindings.length;
+    const list = document.getElementById('findingList');
+    if (!currentFindings.length) { list.innerHTML='<div style="color:#8b949e;text-align:center;padding:20px">暂无匹配疑点</div>'; return; }
+    list.innerHTML = currentFindings.map((f,i) => {
+        const act = i===selectedFindingIdx ? ' finding-item active' : 'finding-item';
+        return '<div class="'+act+'" onclick="selectFinding('+i+')" id="finding-'+i+'">'+
+            '<span class="f-idx">#'+(i+1)+'</span>'+
+            '<div class="f-name">'+(f.name||f.id)+'</div>'+
+            '<div class="f-addr">📍 '+f.addr+'</div>'+
+            '<div class="f-meta">'+
+                (f.monthlyHours!=null?'<span class="tag-hours">⚡ '+f.monthlyHours.toFixed(1)+'h/月</span>':'')+
+                (f.capacity?'<span class="tag-cap">🔋 '+f.capacity+'kW</span>':'')+
+                (f.gridDate?'<span class="tag-date">📅 '+f.gridDate+'</span>':'')+
+            '</div></div>';
+    }).join('');
+}
+
+function selectFinding(idx) {
+    if (idx<0||idx>=currentFindings.length) return;
+    selectedFindingIdx = idx;
+    const f = currentFindings[idx];
+    document.querySelectorAll('.finding-item').forEach(el=>el.classList.remove('active'));
+    const el = document.getElementById('finding-'+idx); if(el) el.classList.add('active');
+    document.getElementById('findingDetail').style.display='block';
+    let d='<b>编号:</b> '+f.id+'<br>';
+    if(f.name) d+='<b>户名:</b> '+f.name+'<br>';
+    d+='<b>地址:</b> '+f.addr+'<br>';
+    if(f.capacity) d+='<b>并网容量:</b> '+f.capacity+' kW<br>';
+    if(f.gridDate) d+='<b>并网时间:</b> '+f.gridDate+'<br>';
+    if(f.monthlyHours!=null) d+='<b>月均发电小时:</b> '+f.monthlyHours.toFixed(1)+' 小时<br>';
+    d+='<b>坐标:</b> '+f.lng.toFixed(6)+', '+f.lat.toFixed(6)+' (WGS-84)';
+    document.getElementById('findingDetailContent').innerHTML = d;
+    locateFinding();
+}
+
+function locateFinding() {
+    if (selectedFindingIdx<0||selectedFindingIdx>=currentFindings.length) { showToast('请先在疑点清单中选择一条疑点'); return; }
+    const f = currentFindings[selectedFindingIdx];
+    currentWgs = { lng:f.lng, lat:f.lat };
+    updateMarker(); updatePosDisplay(); updateMapStatus();
+    map.setZoom(18);
+    showToast('已定位: '+(f.name||f.id));
+    updateFindingMarkerHighlight();
+}
+
+function locateAllFindings() {
+    clearFindingMarkers();
+    if (!currentFindings.length) return;
+    const bounds = [];
+    currentFindings.forEach((f,i) => {
+        const ll = toMap(f.lng,f.lat); bounds.push(ll);
+        const icon = L.divIcon({
+            className: 'finding-marker'+(i===selectedFindingIdx?' active':''),
+            html: '<div class="dot"></div><span style="color:#ff7b72;font-size:0.65em;margin-left:2px;white-space:nowrap;text-shadow:0 0 4px #000">'+(f.name||f.id)+'</span>',
+            iconSize:[120,20], iconAnchor:[5,10]
+        });
+        const m = L.marker(ll,{icon:icon}).addTo(map);
+        m.bindPopup('<b>'+(f.name||f.id)+'</b><br>'+f.addr+'<br>'+
+            (f.capacity?'容量: '+f.capacity+'kW<br>':'')+
+            (f.monthlyHours!=null?'月发电: '+f.monthlyHours.toFixed(1)+'h<br>':'')+
+            '<button onclick="selectFinding('+i+')" style="background:#7c3aed;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;margin-top:4px">查看详情</button>');
+        m.on('click',()=>selectFinding(i));
+        findingMarkers.push(m);
+    });
+    if(bounds.length) map.fitBounds(bounds,{padding:[50,50],maxZoom:16});
+    updateFindingMarkerHighlight();
+    showToast('已标记 '+currentFindings.length+' 个疑点位置');
+}
+
+function clearFindingMarkers() {
+    findingMarkers.forEach(m=>map.removeLayer(m));
+    findingMarkers=[];
+}
+function updateFindingMarkerHighlight() {
+    findingMarkers.forEach((m,i) => {
+        const el=m.getElement(); if(!el) return;
+        const dot=el.querySelector('.dot'); if(!dot) return;
+        if(i===selectedFindingIdx){ dot.style.background='#7c3aed';dot.style.width='14px';dot.style.height='14px';dot.style.boxShadow='0 0 10px rgba(124,58,237,0.8)'; }
+        else { dot.style.background='#ff7b72';dot.style.width='10px';dot.style.height='10px';dot.style.boxShadow='0 0 6px rgba(255,123,114,0.6)'; }
+    });
+}
+
+// ===================================================================
+//  十、数据管理 — JSON导入/导出/编辑
+// ===================================================================
+function toggleDataMgmt() {
+    const div = document.getElementById('dataMgmt');
+    const btn = document.getElementById('dataMgmtBtn');
+    const show = !div.classList.contains('show');
+    div.classList.toggle('show');
+    btn.textContent = show ? '📂 收起数据编辑' : '📂 展开数据编辑 / 导入导出';
+    if (show && currentFindings.length) {
+        document.getElementById('dataJsonEditor').value = JSON.stringify(currentFindings, null, 2);
+    }
+}
+function applyEditedData() {
+    try {
+        const raw = document.getElementById('dataJsonEditor').value.trim();
+        if (!raw) { showToast('JSON为空'); return; }
+        const data = JSON.parse(raw);
+        if (!Array.isArray(data)) { showToast('JSON必须是数组格式'); return; }
+        if (!data.length) { showToast('数组不能为空'); return; }
+        // 补全缺少的字段
+        data.forEach((f,i) => { if(!f.id) f.id='F'+(i+1); if(!f.lng||!f.lat) { showToast('第'+(i+1)+'条缺少坐标'); throw new Error(); } });
+        currentFindings = data;
+        selectedFindingIdx = -1;
+        clearFindingMarkers();
+        renderFindingList();
+        document.getElementById('findingDetail').style.display='none';
+        document.getElementById('promptPanel').style.display='none';
+        document.getElementById('findingPanel').style.display='block';
+        locateAllFindings();
+        showToast('数据已更新 ('+data.length+'条)');
+    } catch(e) { if(e.message) showToast('JSON解析失败: '+e.message); }
+}
+function exportDataJSON() {
+    if (!currentFindings.length) { showToast('无数据可导出'); return; }
+    const blob = new Blob([JSON.stringify(currentFindings,null,2)],{type:'application/json'});
+    const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download = 'audit_findings_'+(currentAuditModel?currentAuditModel.id:'data')+'_'+new Date().toISOString().slice(0,10)+'.json';
+    a.click(); showToast('JSON已下载');
+}
+function importDataJSON(event) {
+    const file = event.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+            if(!Array.isArray(data)) { showToast('JSON格式错误：需要数组'); return; }
+            if(!data.length) { showToast('数组为空'); return; }
+            document.getElementById('dataJsonEditor').value = JSON.stringify(data,null,2);
+            showToast('已导入 '+data.length+' 条数据（点击"应用"生效）');
+        } catch(ex) { showToast('JSON解析失败: '+ex.message); }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+}
+function resetDemoData() {
+    document.getElementById('dataJsonEditor').value = JSON.stringify(DEFAULT_DEMO_FINDINGS,null,2);
+    showToast('演示数据已填入编辑器（点击"应用"生效）');
+}
+
+// ===================================================================
+//  十点五、监听页面焦点 — 从模型管理页切回时自动刷新模型列表
+// ===================================================================
+function refreshModelsFromStorage() {
+    const newModels = loadAuditModels();
+    // Check if models actually changed
+    const oldIds = AUDIT_MODELS.map(m => m.id).sort().join(',');
+    const newIds = newModels.map(m => m.id).sort().join(',');
+    if (oldIds !== newIds || AUDIT_MODELS.length !== newModels.length) {
+        // Models changed — rebuild dropdown
+        AUDIT_MODELS.length = 0;
+        Array.prototype.push.apply(AUDIT_MODELS, newModels);
+        const sel = document.getElementById('auditModelSelect');
+        sel.innerHTML = '<option value="">-- 请选择审计模型 --</option>';
+        initAuditModelSelect();
+        // Restore previous selection if model still exists
+        if (currentAuditModel && newModels.find(m => m.id === currentAuditModel.id)) {
+            sel.value = currentAuditModel.id;
+        } else {
+            currentAuditModel = null;
+            document.getElementById('loadBtn').disabled = true;
+            document.getElementById('modelInfo').classList.remove('show');
+            document.getElementById('modelEmpty').style.display = 'block';
+        }
+    }
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshModelsFromStorage();
+});
+window.addEventListener('focus', () => {
+    refreshModelsFromStorage();
+});
+
+// ===================================================================
+//  十一、框选区域
+// ===================================================================
+const drawnItems = new L.FeatureGroup(); map.addLayer(drawnItems);
+function startDrawRect() {
+    document.getElementById('drawBtn').textContent='▢ 框选中...'; document.getElementById('drawBtn').style.background='#9a6700';
+    new L.Draw.Rectangle(map, {shapeOptions:{color:'#00ff88',weight:2,fillColor:'#00ff88',fillOpacity:0.1}}).enable();
+    map.once(L.Draw.Event.CREATED, e => { drawnItems.clearLayers(); drawnItems.addLayer(e.layer); updateAreaInfo(e.layer); document.getElementById('drawBtn').textContent='▢ 框选'; document.getElementById('drawBtn').style.background=''; });
+}
+function updateAreaInfo(layer) {
+    const b=layer.getBounds(), sw=fromMap(b.getSouthWest().lat,b.getSouthWest().lng), ne=fromMap(b.getNorthEast().lat,b.getNorthEast().lng);
+    const mid=(sw.lat+ne.lat)/2, wM=Math.abs(ne.lng-sw.lng)*111320*Math.cos(mid*PI/180), hM=Math.abs(ne.lat-sw.lat)*111320;
+    document.getElementById('areaInfo').innerHTML=
+        '<b>中心:</b> '+((sw.lng+ne.lng)/2).toFixed(7)+', '+((sw.lat+ne.lat)/2).toFixed(7)+'<br>'+
+        '<b>SW:</b> '+sw.lng.toFixed(7)+', '+sw.lat.toFixed(7)+'<br>'+
+        '<b>NE:</b> '+ne.lng.toFixed(7)+', '+ne.lat.toFixed(7)+'<br>'+
+        '<b>尺寸:</b> '+wM.toFixed(0)+'m × '+hM.toFixed(0)+'m<br>'+
+        '<b>面积:</b> '+(wM*hM/10000).toFixed(3)+' ha<br>'+
+        '<b>bbox:</b> '+sw.lng.toFixed(6)+','+sw.lat.toFixed(6)+','+ne.lng.toFixed(6)+','+ne.lat.toFixed(6);
+}
+function clearArea() { drawnItems.clearLayers(); document.getElementById('areaInfo').innerHTML='未框选 — 点击上方 ▢ 框选 按钮'; document.getElementById('promptPanel').style.display='none'; }
+function exportArea() {
+    if(!drawnItems.getLayers().length){alert('请先框选');return;}
+    const b=drawnItems.getLayers()[0].getBounds(), sw=fromMap(b.getSouthWest().lat,b.getSouthWest().lng), ne=fromMap(b.getNorthEast().lat,b.getNorthEast().lng);
+    const gj={type:'Feature',properties:{activeYear},geometry:{type:'Polygon',coordinates:[[[sw.lng,sw.lat],[ne.lng,sw.lat],[ne.lng,ne.lat],[sw.lng,ne.lat],[sw.lng,sw.lat]]]}};
+    const blob=new Blob([JSON.stringify(gj,null,2)],{type:'application/json'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='area_'+new Date().toISOString().slice(0,10)+'.geojson';a.click();
+}
+
+// ===================================================================
+//  十二、提示词生成
+// ===================================================================
+function generatePrompt() {
+    if(!drawnItems.getLayers().length){showToast('请先用 ▢ 框选工具在地图上框选核查区域');return;}
+    if(selectedFindingIdx<0||!currentFindings[selectedFindingIdx]){showToast('请先在疑点清单中选择一条疑点，再生成提示词');return;}
+
+    const f=currentFindings[selectedFindingIdx];
+    const b=drawnItems.getLayers()[0].getBounds(), sw=fromMap(b.getSouthWest().lat,b.getSouthWest().lng), ne=fromMap(b.getNorthEast().lat,b.getNorthEast().lng);
+    const center={lng:(sw.lng+ne.lng)/2,lat:(sw.lat+ne.lat)/2}, wM=Math.abs(ne.lng-sw.lng)*111320*Math.cos(center.lat*PI/180), hM=Math.abs(ne.lat-sw.lat)*111320;
+    const modelName=currentAuditModel?currentAuditModel.name:'未指定';
+    const gapH=(60-f.monthlyHours).toFixed(1), gapP=((60-f.monthlyHours)/60*100).toFixed(1);
+    const gd=new Date(f.gridDate), bd=new Date(gd);bd.setMonth(bd.getMonth()-1);
+    const ad=new Date(gd);ad.setMonth(ad.getMonth()+1);
+    const fmt=d=>d.getFullYear()+'年'+(d.getMonth()+1)+'月'+d.getDate()+'日';
+
+    const prompt =
+'═══════════════════════════════════════\n'+
+'       审计核查任务 — '+modelName+'\n'+
+'═══════════════════════════════════════\n\n'+
+'【一、疑点基本信息】\n'+
+'  疑点编号  ：'+f.id+'\n'+
+'  用户姓名  ：'+f.name+'\n'+
+'  详细地址  ：'+f.addr+'\n'+
+'  并网容量  ：'+f.capacity+' kW\n'+
+'  并网时间  ：'+f.gridDate+'\n'+
+'  月均发电  ：'+f.monthlyHours.toFixed(1)+' 小时/月\n'+
+'  异常判定  ：低于阈值 '+gapH+' 小时（缺口 '+gapP+'%）\n'+
+'  坐标位置  ：'+f.lng.toFixed(6)+', '+f.lat.toFixed(6)+' (WGS-84)\n\n'+
+'【二、框选核查区域坐标范围】\n'+
+'  坐标系统  ：WGS-84\n'+
+'  西南角SW  ：lng='+sw.lng.toFixed(6)+', lat='+sw.lat.toFixed(6)+'\n'+
+'  东北角NE  ：lng='+ne.lng.toFixed(6)+', lat='+ne.lat.toFixed(6)+'\n'+
+'  中心坐标  ：lng='+center.lng.toFixed(6)+', lat='+center.lat.toFixed(6)+'\n'+
+'  地面范围  ：约 '+wM.toFixed(0)+'m（东西）× '+hM.toFixed(0)+'m（南北）\n'+
+'  覆盖面积  ：'+(wM*hM/10000).toFixed(3)+' 公顷（'+(wM*hM).toFixed(0)+' ㎡）\n'+
+'  BBOX     ：'+sw.lng.toFixed(6)+','+sw.lat.toFixed(6)+','+ne.lng.toFixed(6)+','+ne.lat.toFixed(6)+'\n\n'+
+'【三、历史影像核查要求】\n'+
+'  1. 调取并网前影像（建议时段：'+fmt(bd)+' 前后）\n'+
+'     → 确认并网前该地址屋顶/场地是否已存在光伏安装迹象\n'+
+'  2. 调取并网日影像（'+f.gridDate+' 前后30天内）\n'+
+'     → 核实框选范围内光伏板实际安装面积与板数\n'+
+'     → 对比 '+f.capacity+'kW 并网容量对应的标准安装规模\n'+
+'     → 参考标准：1kW ≈ 6~8㎡ 光伏板面积 ≈ 3~4块550W组件\n'+
+'     → 预期安装面积：约 '+(f.capacity*7).toFixed(0)+' ㎡，预期组件数：约 '+(f.capacity*3.5).toFixed(0)+' 块\n'+
+'  3. 调取并网后影像（建议时段：'+fmt(ad)+' 前后）\n'+
+'     → 确认光伏设施是否持续存在、有无拆除或扩建\n\n'+
+'【四、发电异常诊断】\n'+
+'  异常阈值  ：月发电小时数 < 60 小时\n'+
+'  实际数值  ：'+f.monthlyHours.toFixed(1)+' 小时/月\n'+
+'  偏差小时  ：'+gapH+' 小时\n'+
+'  偏差比例  ：'+gapP+'%\n'+
+'  可能原因  ：\n'+
+'    □ 光伏组件安装面积不足（虚报容量）\n'+
+'    □ 组件遮挡/阴影/朝向问题导致发电量低\n'+
+'    □ 逆变器/并网设备故障\n'+
+'    □ 组件老化或污染（灰尘/鸟粪等）\n'+
+'    □ 实际未并网或并网后即拆除\n'+
+'    □ 电表计量异常\n\n'+
+'【五、核查结论输出要求】\n'+
+'  1. 提供框选区域并网日前后卫星图对比截图（标注坐标和比例尺）\n'+
+'  2. 标注光伏板可视范围，估算实际安装面积\n'+
+'  3. 给出容量匹配度结论（实际安装 vs 申报 '+f.capacity+'kW）\n'+
+'  4. 结合月发电小时 '+f.monthlyHours.toFixed(1)+'h 给出综合判定\n'+
+'  5. 如有异常，明确整改建议和证据留存\n\n'+
+'═══════════════════════════════════════\n'+
+'生成时间：'+new Date().toLocaleString()+'\n'+
+'数据来源：数字化审计卫星地图疑点核查系统\n'+
+'═══════════════════════════════════════';
+
+    document.getElementById('promptContent').textContent = prompt;
+    document.getElementById('promptPanel').style.display = 'block';
+    document.getElementById('promptPanel').scrollIntoView({behavior:'smooth'});
+    showToast('核查提示词已生成（基于疑点: '+f.name+'）');
+}
+function copyPrompt() {
+    navigator.clipboard.writeText(document.getElementById('promptContent').textContent).then(()=>showToast('提示词已复制到剪贴板'));
+}
+
+// ===================================================================
+//  十三、Token & 星图云API
+// ===================================================================
+function saveToken() {
+    TOKEN=document.getElementById('tokenInput').value.trim();
+    if(!TOKEN){alert('请输入Token');return;}
+    document.getElementById('tokenBtn').classList.add('ok'); document.getElementById('tokenBtn').textContent='✓ 已保存';
+    document.getElementById('tokenStatus').innerHTML='<span style="color:#3fb950">✓</span> 已设置';
+    if(document.getElementById('basemapSelect').value==='geovis') initGeovisCurrent();
+}
+async function queryHistory() {
+    if(!TOKEN){alert('请先输入Token');return;}
+    if(!drawnItems.getLayers().length){alert('请先用 ▢ 框选 工具框选核查区域');return;}
+    const b=drawnItems.getLayers()[0].getBounds(), sw=fromMap(b.getSouthWest().lat,b.getSouthWest().lng), ne=fromMap(b.getNorthEast().lat,b.getNorthEast().lng);
+    const bbox=sw.lng.toFixed(6)+','+sw.lat.toFixed(6)+','+ne.lng.toFixed(6)+','+ne.lat.toFixed(6);
+    document.getElementById('searchStatus').textContent='查询历史影像...';
+    try{
+        const resp=await fetch('https://api.open.geovisearth.com/v2/timeSeries/history/city?bbox='+bbox+'&token='+TOKEN);
+        const data=await resp.json();
+        const cities=Object.keys(data);
+        if(!cities.length){showToast('该区域无历史影像覆盖');return;}
+        historyData=data;
+        let allYears=[];
+        for(const city of cities){if(Array.isArray(data[city])) data[city].forEach(y=>allYears.push({city,...y}));}
+        allYears.sort((a,b)=>parseInt(b.year)-parseInt(a.year));
+        const ys=document.getElementById('activeYearSelect');
+        ys.innerHTML='<option value="current">当前影像 (0.5m)</option>';
+        allYears.forEach(y=>{ys.innerHTML+='<option value="'+y.year+'">'+y.year+' 年 ('+y.city+')</option>';});
+        document.getElementById('searchStatus').textContent='找到 '+allYears.length+' 个历史年份';
+        showToast('找到 '+allYears.length+' 个年份');
+    }catch(e){showToast('查询失败: '+e.message);}
+}
+function switchActiveYear() {
+    const val=document.getElementById('activeYearSelect').value;
+    if(val==='current'){activeYear='current';if(historyLayer){map.removeLayer(historyLayer);historyLayer=null;}if(geovisCurrentLayer&&TOKEN)geovisCurrentLayer.addTo(map);else amapSat.addTo(map);updateMapStatus();}
+}
+
+// ===================================================================
+//  十四、地理编码搜索
+// ===================================================================
+let _searchCache=[];
+async function doSearch() {
+    const q=document.getElementById('searchInput').value.trim(); if(!q)return;
+    if(!TOKEN){alert('搜索功能需要星图云Token（定位和框选功能不受影响）');return;}
+    const rd=document.getElementById('searchResults'); rd.style.display='block'; rd.innerHTML='<div class="empty">搜索中...</div>';
+    try{
+        // 坐标检测
+        const cm=q.match(/^[\s]*(\d{2,3}\.\d+)[,\s]+(\d{2,3}\.\d+)[\s]*$/);
+        if(cm){currentWgs={lng:parseFloat(cm[1]),lat:parseFloat(cm[2])};updateMarker();updatePosDisplay();rd.innerHTML='<div class="empty">已定位</div>';setTimeout(()=>rd.style.display='none',2000);return;}
+        // Geocode + POI 并行搜索
+        const tasks=[];
+        const geocode=async(kw,region)=>{
+            let url='https://api.open.geovisearth.com/pj/geo/v2/geocode/geo?keyword='+encodeURIComponent(kw)+'&pageSize=10&token='+TOKEN;
+            if(region) url+='&region='+encodeURIComponent(region);
+            const r=await fetch(url),d=await r.json();
+            if(d.code===0&&Array.isArray(d.data)) return d.data.map(x=>{const l=(x.location||'').split(',');return{name:x.street||x.formattedAddress||'未知',addr:x.formattedAddress||'',lng:parseFloat(l[0])||0,lat:parseFloat(l[1])||0};}).filter(x=>x.lng&&x.lat);
+            return[];
+        };
+        const poi=async(kw,region)=>{
+            let url='https://api.open.geovisearth.com/pj/geo/v2/assistant/suggestion?keyword='+encodeURIComponent(kw)+'&pageSize=10&token='+TOKEN;
+            if(region==='苏州市') url+='&code=320500'; else if(region==='江苏省') url+='&code=320000';
+            const r=await fetch(url),d=await r.json();
+            if(d.code===0&&Array.isArray(d.data)) return d.data.map(x=>{const l=(x.location||'').split(',');return{name:x.name||'',addr:x.address||x.district||'',lng:parseFloat(l[0])||0,lat:parseFloat(l[1])||0,source:'POI'};}).filter(x=>x.lng&&x.lat);
+            return[];
+        };
+        tasks.push(geocode(q,'苏州市'),geocode(q,''),poi(q,'苏州市'),poi(q,''));
+        const batches=await Promise.all(tasks);
+        const seen=new Map(),all=[];
+        batches.flat().forEach(r=>{const k=r.lng.toFixed(3)+','+r.lat.toFixed(3);if(!seen.has(k)){seen.set(k,true);all.push(r);}});
+        all.sort((a,b)=>{
+            let sa=0,sb=0;
+            if((a.addr||'').includes('张家港市'))sa+=100;else if((a.addr||'').includes('苏州市'))sa+=60;
+            if((b.addr||'').includes('张家港市'))sb+=100;else if((b.addr||'').includes('苏州市'))sb+=60;
+            if(a.name&&a.name.includes(q))sa+=50; if(b.name&&b.name.includes(q))sb+=50;
+            return sb-sa;
+        });
+        _searchCache=all;
+        if(!all.length) rd.innerHTML='<div class="empty">未找到结果<br><small>简化关键词或直接输入坐标 (如 120.5489, 31.9751)</small></div>';
+        else rd.innerHTML=all.map((r,i)=>'<div class="item" onclick="selectResult('+i+')"><div class="name">'+r.name+'</div><div>'+(r.addr||'')+'</div><div style="color:#484f58;font-size:0.8em">'+r.lng.toFixed(6)+', '+r.lat.toFixed(6)+'</div></div>').join('');
+    }catch(e){rd.innerHTML='<div class="empty">网络错误: '+e.message+'</div>';}
+}
+function selectResult(i){const r=_searchCache[i];if(!r)return;currentWgs={lng:r.lng,lat:r.lat};updateMarker();updatePosDisplay();document.getElementById('searchResults').style.display='none';document.getElementById('searchInput').value=r.name+' — '+(r.addr||'');}
+async function reverseGeocode(){
+    if(!TOKEN){alert('请先设置Token');return;}
+    const kw=currentWgs.lng.toFixed(6)+','+currentWgs.lat.toFixed(6);
+    try{
+        let r=await fetch('https://api.open.geovisearth.com/pj/geo/v2/assistant/suggestion?keyword='+encodeURIComponent(kw)+'&pageSize=5&token='+TOKEN);
+        let d=await r.json();
+        if(d.code===0&&Array.isArray(d.data)&&d.data.length){alert('附近POI:\n'+d.data.map(x=>x.name+'\n  '+(x.address||x.district||'')).filter(Boolean).join('\n'));return;}
+        r=await fetch('https://api.open.geovisearth.com/pj/geo/v2/geocode/geo?keyword='+encodeURIComponent(kw)+'&pageSize=5&token='+TOKEN);
+        d=await r.json();
+        if(d.code===0&&Array.isArray(d.data)&&d.data.length) alert('逆地理编码:\n'+d.data.map(x=>x.formattedAddress||x.street||'').filter(Boolean).join('\n'));
+        else alert('该坐标无地址信息');
+    }catch(e){alert('失败: '+e.message);}
+}
+document.addEventListener('click',e=>{if(!e.target.closest('#searchResults')&&!e.target.closest('.search-bar')) document.getElementById('searchResults').style.display='none';});
+
+// ===================================================================
+//  十五、工具函数
+// ===================================================================
+function mapZoom(d){map.setZoom(Math.max(14,Math.min(20,map.getZoom()+d)));}
+function toggleCircle(){circleShown=!circleShown;if(circleShown){const ll=toMap(currentWgs.lng,currentWgs.lat);circle100m=L.circle(ll,{radius:100,color:'#ff8800',weight:2,fill:false,dashArray:'8,4',opacity:0.7}).addTo(map);}else{if(circle100m){map.removeLayer(circle100m);circle100m=null;}}document.getElementById('circleBtn').textContent=circleShown?'⭕ 100m圈(显示)':'⭕ 100m圈(隐藏)';}
+function toggleMeasure(){measuring=!measuring;map.getContainer().style.cursor=measuring?'crosshair':'';document.getElementById('measureBtn').textContent=measuring?'📏 测距(激活)':'📏 测距';if(!measuring){measurePoints.forEach(p=>map.removeLayer(p));measureLines.forEach(l=>map.removeLayer(l));measurePoints=[];measureLines=[];}}
+function addMeasurePoint(ll){const pt=L.circleMarker(ll,{radius:4,color:'#ff0',fillColor:'#ff0',fillOpacity:0.8}).addTo(map);measurePoints.push(pt);if(measurePoints.length>=2){const p1=measurePoints[measurePoints.length-2].getLatLng(),p2=measurePoints[measurePoints.length-1].getLatLng();const line=L.polyline([p1,p2],{color:'#ff0',weight:2,dashArray:'4,4'}).addTo(map);line.bindTooltip(Math.round(p1.distanceTo(p2))+'m',{permanent:true,direction:'center'}).openTooltip();measureLines.push(line);}}
+function showManual(){document.getElementById('manualPanel').style.display='block';document.getElementById('mLng').value=currentWgs.lng.toFixed(7);document.getElementById('mLat').value=currentWgs.lat.toFixed(7);}
+function goManual(){const lng=parseFloat(document.getElementById('mLng').value),lat=parseFloat(document.getElementById('mLat').value);if(isNaN(lng)||isNaN(lat))return;currentWgs={lng,lat};updateMarker();updatePosDisplay();updateMapStatus();}
+function copyCoord(){navigator.clipboard.writeText(currentWgs.lng.toFixed(7)+', '+currentWgs.lat.toFixed(7)).then(()=>showToast('坐标已复制'));}
+async function captureMap(){try{const c=await html2canvas(document.getElementById('mapContainer'),{useCORS:true,allowTaint:true,backgroundColor:'#0d1117'});const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download='audit_'+(currentAuditModel?currentAuditModel.id:'map')+'_'+currentWgs.lng.toFixed(4)+'_'+currentWgs.lat.toFixed(4)+'_'+new Date().toISOString().slice(0,10)+'.png';a.click();showToast('截图已保存');}catch(e){alert('截图失败: '+e.message);}}
+
+// ===================================================================
+//  十六、初始化
+// ===================================================================
+initAuditModelSelect();
+updatePosDisplay(); updateMapStatus();
+circle100m = L.circle(toMap(currentWgs.lng,currentWgs.lat),{radius:100,color:'#ff8800',weight:2,fill:false,dashArray:'8,4',opacity:0.7}).addTo(map);
+// 默认选中光伏发电小时异常模型
+document.getElementById('auditModelSelect').value = 'pv_hours_anomaly';
+onAuditModelChange();
+</script>
+</body>
+</html>

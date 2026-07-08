@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>卫星图 - 120.583515°E, 31.986279°N</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:'Segoe UI','Microsoft YaHei',sans-serif;padding:24px}
+h1{color:#58a6ff;font-size:1.4em}
+h2{color:#8b949e;font-size:0.9em;font-weight:normal;margin:4px 0 20px}
+.info{background:#161b22;border-left:3px solid #3fb950;padding:14px 18px;margin:16px 0;border-radius:6px;font-size:0.9em;line-height:1.6}
+.info strong{color:#3fb950}
+.card{background:#161b22;padding:18px;margin:20px 0;border-radius:8px;border:1px solid #30363d}
+.card h3{color:#d2a8ff;margin-bottom:6px}
+.card .meta{color:#8b949e;font-size:0.8em;margin:2px 0}
+.card img{max-width:100%;margin-top:12px;border-radius:4px;border:1px solid #30363d;cursor:zoom-in}
+.note{background:#1a1a0e;border:1px solid #d2991d;padding:14px;margin:24px 0;border-radius:6px;font-size:0.85em;line-height:1.5}
+.note strong{color:#d2991d}
+.scale{display:flex;gap:24px;flex-wrap:wrap;margin:12px 0}
+.scale-item{background:#161b22;padding:8px 14px;border-radius:4px;font-size:0.8em;color:#8b949e;border:1px solid #30363d}
+.scale-item b{color:#c9d1d9}
+</style>
+</head>
+<body>
+<h1>卫星地图核查视图 v2</h1>
+<h2>WGS-84: 120.583515°E, 31.986279°N — 江苏省苏州市张家港市锦丰镇沿江</h2>
+<div class="info">
+    📍 <strong>目标坐标:</strong> 120.583515°E, 31.986279°N (WGS-84)<br>
+    🗺️ <strong>数据源:</strong> Esri World Imagery (ArcGIS REST API)<br>
+    🔴 <strong>红色十字</strong> = 目标坐标位置 | 底部比例尺 = 100m
+</div>
+<div class="scale">
+    <div class="scale-item">z17<b> ~1.0m/px</b> 概览</div>
+    <div class="scale-item">z18 <b>~0.5m/px</b> 详细</div>
+    <div class="scale-item">z19 <b>~0.25m/px</b> 超清</div>
+    <div class="scale-item">z20 <b>~0.13m/px</b> 极限</div>
+</div>
+
+        <div class="card">
+            <h3>z17_overview</h3>
+            <div class="meta">1280x1280px | ~1.013m/px | 覆盖 1297m x 1297m</div>
+            <div class="meta">范围: [120.57770, 120.59143] x [31.98012, 31.99177]</div>
+            <img src="satellite_v2_z17_overview.jpg" loading="lazy" />
+        </div>
+        <div class="card">
+            <h3>z18_detail</h3>
+            <div class="meta">768x768px | ~0.506m/px | 覆盖 389m x 389m</div>
+            <div class="meta">范围: [120.58182, 120.58594] x [31.98478, 31.98828]</div>
+            <img src="satellite_v2_z18_detail.jpg" loading="lazy" />
+        </div>
+        <div class="card">
+            <h3>z19_ultra</h3>
+            <div class="meta">768x768px | ~0.253m/px | 覆盖 194m x 194m</div>
+            <div class="meta">范围: [120.58250, 120.58456] x [31.98537, 31.98711]</div>
+            <img src="satellite_v2_z19_ultra.jpg" loading="lazy" />
+        </div>
+        <div class="card">
+            <h3>z20_extreme</h3>
+            <div class="meta">768x768px | ~0.127m/px | 覆盖 97m x 97m</div>
+            <div class="meta">范围: [120.58285, 120.58388] x [31.98595, 31.98682]</div>
+            <img src="satellite_v2_z20_extreme.jpg" loading="lazy" />
+        </div>
+<div class="note">
+    ⚠️ <strong>注意:</strong> 当前为 Esri 免费图源最新影像，无法回溯历史日期。<br>
+    430/531 新政核查需采购 2025年3-6月存档影像，z18(0.5m)即可满足光伏板面积识别。
+</div>
+</body>
+</html>

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>坐标校准 - 光伏核查点位选择</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Microsoft YaHei', sans-serif; background: #1a1a2e; }
+.header { background: linear-gradient(135deg, #0f0c29, #302b63); color: #fff; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+.header h1 { font-size: 1.1em; }
+.coord-panel { background: #16213e; color: #eee; padding: 20px; border-bottom: 2px solid #00ff88; }
+.coord-panel h2 { font-size: 1em; color: #00ff88; margin-bottom: 10px; }
+.coord-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.coord-row label { min-width: 70px; font-size: 0.85em; color: #aaa; }
+.coord-row input { background: #0f3460; color: #0f0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; font-family: monospace; font-size: 0.9em; width: 180px; }
+.coord-row input:focus { border-color: #00ff88; outline: none; }
+.btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; font-weight: bold; transition: all 0.2s; }
+.btn-go { background: #00ff88; color: #000; }
+.btn-go:hover { background: #00cc6a; }
+.btn-copy { background: #0f3460; color: #00ff88; border: 1px solid #00ff88; }
+.btn-copy:hover { background: #1a4a7a; }
+.selected-info { background: #1a3a1a; border: 1px solid #00ff88; padding: 10px 14px; border-radius: 4px; margin-top: 10px; font-family: monospace; font-size: 0.85em; }
+.selected-info strong { color: #ffd700; }
+#map { height: calc(100vh - 230px); min-height: 500px; }
+.map-controls { position: absolute; top: 10px; right: 10px; z-index: 1000; background: rgba(0,0,0,0.7); padding: 8px; border-radius: 4px; }
+.map-controls button { display: block; width: 100%; margin: 2px 0; padding: 6px 10px; background: #333; color: #fff; border: 1px solid #555; border-radius: 3px; cursor: pointer; font-size: 0.8em; }
+.map-controls button.active { background: #00ff88; color: #000; border-color: #00ff88; }
+.marker-icon-red { filter: hue-rotate(140deg) saturate(200%); }
+.crosshair { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin-left: -20px; margin-top: -20px; z-index: 999; pointer-events: none; display: none; }
+.crosshair::before, .crosshair::after { content: ''; position: absolute; background: rgba(255,0,0,0.6); }
+.crosshair::before { top: 19px; left: 0; width: 40px; height: 2px; }
+.crosshair::after { top: 0; left: 19px; width: 2px; height: 40px; }
+.tip { font-size: 0.8em; color: #888; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>光伏并网核查 — 坐标校准工具</h1>
+    <span style="font-size:0.8em;color:#888">点击地图选择目标位置 | 支持多种底图切换</span>
+</div>
+
+<div class="coord-panel">
+    <div class="coord-row">
+        <label>百度坐标:</label>
+        <input id="bdLng" value="120.600631" onchange="moveToBD()">,
+        <input id="bdLat" value="31.994167" onchange="moveToBD()">
+        <button class="btn btn-go" onclick="moveToBD()">定位百度</button>
+        <button class="btn btn-copy" onclick="copyCoords('bd')">复制百度坐标</button>
+    </div>
+    <div class="coord-row">
+        <label>WGS-84:</label>
+        <input id="wgsLng" value="120.590000" readonly style="color:#ffd700">,
+        <input id="wgsLat" value="31.990000" readonly style="color:#ffd700">
+        <button class="btn btn-copy" onclick="copyCoords('wgs')">复制WGS-84</button>
+        <span class="tip">(WGS-84 用于卫星图数据采购)</span>
+    </div>
+    <div id="selectedDisplay" class="selected-info">
+        当前选中: <strong id="selCoord">120.590000, 31.990000</strong> (WGS-84) |
+        BD-09: <strong id="selBD">120.600631, 31.994167</strong>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script>
+// Coordinate conversion functions
+const PI = Math.PI, A = 6378245.0, EE = 0.00669342162296594323;
+
+function transformLat(x, y) {
+    let ret = -100 + 2*x + 3*y + 0.2*y*y + 0.1*x*y + 0.2*Math.sqrt(Math.abs(x));
+    ret += (20*Math.sin(6*x*PI) + 20*Math.sin(2*x*PI)) * 2/3;
+    ret += (20*Math.sin(y*PI) + 40*Math.sin(y/3*PI)) * 2/3;
+    ret += (160*Math.sin(y/12*PI) + 320*Math.sin(y*PI/30)) * 2/3;
+    return ret;
+}
+function transformLon(x, y) {
+    let ret = 300 + x + 2*y + 0.1*x*x + 0.1*x*y + 0.1*Math.sqrt(Math.abs(x));
+    ret += (20*Math.sin(6*x*PI) + 20*Math.sin(2*x*PI)) * 2/3;
+    ret += (20*Math.sin(x*PI) + 40*Math.sin(x/3*PI)) * 2/3;
+    ret += (150*Math.sin(x/12*PI) + 300*Math.sin(x/30*PI)) * 2/3;
+    return ret;
+}
+function wgs84ToGcj02(lng, lat) {
+    const dLat = transformLat(lng - 105, lat - 35);
+    const dLon = transformLon(lng - 105, lat - 35);
+    const radLat = lat / 180 * PI;
+    let magic = Math.sin(radLat);
+    magic = 1 - EE * magic * magic;
+    const sqrtMagic = Math.sqrt(magic);
+    const dLatOut = (dLat * 180) / ((A*(1-EE))/(magic*sqrtMagic)*PI);
+    const dLonOut = (dLon * 180) / (A/sqrtMagic*Math.cos(radLat)*PI);
+    return { lng: lng + dLonOut, lat: lat + dLatOut };
+}
+function gcj02ToBd09(lng, lat) {
+    const z = Math.sqrt(lng*lng + lat*lat) + 0.00002 * Math.sin(lat * PI * 3000/180);
+    const theta = Math.atan2(lat, lng) + 0.000003 * Math.cos(lng * PI * 3000/180);
+    return { lng: z*Math.cos(theta) + 0.0065, lat: z*Math.sin(theta) + 0.006 };
+}
+function bd09ToGcj02(lng, lat) {
+    const x = lng - 0.0065, y = lat - 0.006;
+    const z = Math.sqrt(x*x + y*y) - 0.00002 * Math.sin(y * PI * 3000/180);
+    const theta = Math.atan2(y, x) - 0.000003 * Math.cos(x * PI * 3000/180);
+    return { lng: z*Math.cos(theta), lat: z*Math.sin(theta) };
+}
+function gcj02ToWgs84(lng, lat) {
+    const gcj = { lng, lat };
+    let wgs = { lng: lng, lat: lat };
+    // Iterative approach
+    for (let i = 0; i < 5; i++) {
+        const tmp = wgs84ToGcj02(wgs.lng, wgs.lat);
+        wgs.lng += lng - tmp.lng;
+        wgs.lat += lat - tmp.lat;
+    }
+    return wgs;
+}
+function wgsToBD(wgsLng, wgsLat) {
+    const gcj = wgs84ToGcj02(wgsLng, wgsLat);
+    return gcj02ToBd09(gcj.lng, gcj.lat);
+}
+function bdToWgs(bdLng, bdLat) {
+    const gcj = bd09ToGcj02(bdLng, bdLat);
+    return gcj02ToWgs84(gcj.lng, gcj.lat);
+}
+
+// Initialize map (use GCJ-02 tiles from Amap)
+const initGcj = wgs84ToGcj02(120.59, 31.99);
+
+// Amap satellite tile layer (GCJ-02)
+const amapSat = L.tileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', {
+    subdomains: ['1','2','3','4'],
+    attribution: '高德卫星图',
+    maxZoom: 18
+});
+
+// Amap road map (GCJ-02)
+const amapRoad = L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+    subdomains: ['1','2','3','4'],
+    attribution: '高德地图',
+    maxZoom: 18
+});
+
+// OSM tiles (WGS-84, for reference)
+const osmMap = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: 'OpenStreetMap',
+    maxZoom: 19
+});
+
+// Esri satellite (WGS-84)
+const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Esri World Imagery',
+    maxZoom: 19
+});
+
+const map = L.map('map', {
+    center: [initGcj.lat, initGcj.lng],
+    zoom: 17,
+    layers: [amapSat],
+    zoomControl: true
+});
+
+// Layer switcher
+const layerControl = L.control.layers({
+    '高德卫星图 (GCJ-02)': amapSat,
+    '高德地图 (GCJ-02)': amapRoad,
+    'Esri 卫星图 (WGS-84)': esriSat,
+    'OpenStreetMap (WGS-84)': osmMap
+}, {}, { position: 'topright', collapsed: false });
+layerControl.addTo(map);
+
+let marker = L.marker([initGcj.lat, initGcj.lng], {
+    draggable: true,
+    title: '目标位置'
+}).addTo(map).bindPopup('初始坐标位置<br>可拖动调整');
+
+// Update coords on marker drag
+marker.on('dragend', function(e) {
+    updateFromMarker(e.target.getLatLng());
+});
+
+// Update coords on map click
+map.on('click', function(e) {
+    marker.setLatLng(e.latlng);
+    updateFromMarker(e.latlng);
+});
+
+function updateFromMarker(latlng) {
+    // latlng is in GCJ-02 (Amap tile CRS)
+    const gcjLng = latlng.lng, gcjLat = latlng.lat;
+    const wgs = gcj02ToWgs84(gcjLng, gcjLat);
+    const bd = gcj02ToBd09(gcjLng, gcjLat);
+
+    document.getElementById('wgsLng').value = wgs.lng.toFixed(6);
+    document.getElementById('wgsLat').value = wgs.lat.toFixed(6);
+    document.getElementById('bdLng').value = bd.lng.toFixed(6);
+    document.getElementById('bdLat').value = bd.lat.toFixed(6);
+    document.getElementById('selCoord').innerText = wgs.lng.toFixed(6) + ', ' + wgs.lat.toFixed(6);
+    document.getElementById('selBD').innerText = bd.lng.toFixed(6) + ', ' + bd.lat.toFixed(6);
+
+    marker.setPopupContent(
+        '<b>选中位置</b><br>' +
+        'WGS-84: ' + wgs.lng.toFixed(6) + ', ' + wgs.lat.toFixed(6) + '<br>' +
+        'BD-09: ' + bd.lng.toFixed(6) + ', ' + bd.lat.toFixed(6) + '<br>' +
+        '<small>拖动标记可微调</small>'
+    );
+}
+
+function moveToBD() {
+    const bdLng = parseFloat(document.getElementById('bdLng').value);
+    const bdLat = parseFloat(document.getElementById('bdLat').value);
+    if (isNaN(bdLng) || isNaN(bdLat)) return;
+
+    const gcj = bd09ToGcj02(bdLng, bdLat);
+    const wgs = gcj02ToWgs84(gcj.lng, gcj.lat);
+
+    document.getElementById('wgsLng').value = wgs.lng.toFixed(6);
+    document.getElementById('wgsLat').value = wgs.lat.toFixed(6);
+
+    map.setView([gcj.lat, gcj.lng], 18);
+    marker.setLatLng([gcj.lat, gcj.lng]);
+    updateFromMarker({ lng: gcj.lng, lat: gcj.lat });
+}
+
+function copyCoords(sys) {
+    let text;
+    if (sys === 'bd') {
+        text = document.getElementById('bdLng').value + ',' + document.getElementById('bdLat').value;
+    } else {
+        text = document.getElementById('wgsLng').value + ',' + document.getElementById('wgsLat').value;
+    }
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target;
+        const orig = btn.innerText;
+        btn.innerText = '已复制!';
+        btn.style.background = '#00ff88';
+        btn.style.color = '#000';
+        setTimeout(() => { btn.innerText = orig; btn.style.background = ''; btn.style.color = ''; }, 1500);
+    });
+}
+
+// Show initial coords
+updateFromMarker({ lng: initGcj.lng, lat: initGcj.lat });
+</script>
+</body>
+</html>

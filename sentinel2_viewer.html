@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Sentinel-2 历史影像对比 — 张家港大新镇</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:'Microsoft YaHei',sans-serif;padding:24px}
+h1{color:#58a6ff;font-size:1.2em}
+h2{color:#8b949e;font-size:0.8em;font-weight:normal;margin:4px 0 18px}
+.info{background:#161b22;border-left:3px solid #3fb950;padding:14px 18px;margin:16px 0;border-radius:6px;font-size:0.85em;line-height:1.7}
+.cards{display:flex;flex-wrap:wrap;gap:16px}
+.card{background:#161b22;padding:14px;border-radius:8px;border:1px solid #30363d;width:280px}
+.card h3{color:#d2a8ff;margin-bottom:4px}
+.badge{background:#9a6700;color:#fff;font-size:0.7em;padding:2px 6px;border-radius:8px;margin-left:6px}
+.meta{color:#8b949e;font-size:0.75em;margin:4px 0 8px}
+.card img{width:100%;border-radius:4px;border:1px solid #30363d}
+.note{background:#1a1a0e;border:1px solid #d2991d;padding:14px;margin:24px 0;border-radius:6px;font-size:0.8em;line-height:1.6}
+</style>
+</head>
+<body>
+<h1>Sentinel-2 历史卫星影像 — 张家港市大新镇永凝路</h1>
+<h2>位置: 120.534896°E, 31.977671°N | 分辨率: 10m/px | 数据: ESA Sentinel-2 L2A (公开)</h2>
+<div class="info">
+    <strong>目标:</strong> 江苏宏宝集团有限公司 (永凝路128号)<br>
+    <strong>分辨率:</strong> 10m/px — 可识别大型光伏阵列，不能分辨单块面板<br>
+    <strong>数据源:</strong> AWS Sentinel-2 公开数据 (无需注册)<br>
+    <strong>说明:</strong> Sentinel-2 从2015年7月开始运行，每5天重访一次
+</div>
+<div class="cards">
+        <div class="card">
+            <h3>2017年 <span class="badge">☁1%</span></h3>
+            <div class="meta">2017-10-31 | Sentinel-2 L2A | 10m/px</div>
+            <img src="sentinel2_2017_2017-10-31.jpg" loading="lazy" />
+        </div>
+        <div class="card">
+            <h3>2018年 <span class="badge">☁1%</span></h3>
+            <div class="meta">2018-02-23 | Sentinel-2 L2A | 10m/px</div>
+            <img src="sentinel2_2018_2018-02-23.jpg" loading="lazy" />
+        </div>
+        <div class="card">
+            <h3>2020年 <span class="badge">☁0%</span></h3>
+            <div class="meta">2020-09-05 | Sentinel-2 L2A | 10m/px</div>
+            <img src="sentinel2_2020_2020-09-05.jpg" loading="lazy" />
+        </div>
+        <div class="card">
+            <h3>2021年 <span class="badge">☁0%</span></h3>
+            <div class="meta">2021-06-22 | Sentinel-2 L2A | 10m/px</div>
+            <img src="sentinel2_2021_2021-06-22.jpg" loading="lazy" />
+        </div>
+        <div class="card">
+            <h3>2022年 <span class="badge">☁0%</span></h3>
+            <div class="meta">2022-05-03 | Sentinel-2 L2A | 10m/px</div>
+            <img src="sentinel2_2022_2022-05-03.jpg" loading="lazy" />
+        </div>
+        <div class="card">
+            <h3>2023年 <span class="badge">☁0%</span></h3>
+            <div class="meta">2023-11-24 | Sentinel-2 L2A | 10m/px</div>
+            <img src="sentinel2_2023_2023-11-24.jpg" loading="lazy" />
+        </div>
+        <div class="card">
+            <h3>2024年 <span class="badge">☁0%</span></h3>
+            <div class="meta">2024-02-12 | Sentinel-2 L2A | 10m/px</div>
+            <img src="sentinel2_2024_2024-02-12.jpg" loading="lazy" />
+        </div></div>
+<div class="note">
+    ⚠️ <strong>10m分辨率限制:</strong> Sentinel-2 每个像素代表10m×10m地面区域。<br>
+    一块标准光伏板(2m×1m)在影像中远小于1个像素，无法直接分辨。<br>
+    但大型光伏阵列(50m×100m以上)会呈现为深色矩形区域，可以识别。<br><br>
+    <strong>如需更高分辨率:</strong><br>
+    • Google Earth Pro (桌面版) — 历史影像滑块，0.3-1m分辨率，覆盖张家港<br>
+    • Planet Labs — 3-5m分辨率，需付费订阅<br>
+    • 联系星图云 — 询问企业定制历史影像服务
+</div>
+</body>
+</html>

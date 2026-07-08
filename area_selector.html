@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>光伏核查 — 区域框选工具</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;height:100vh;display:flex;flex-direction:column}
+.header{background:#161b22;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;border-bottom:1px solid #30363d}
+.header h1{font-size:1em;color:#58a6ff;white-space:nowrap}
+.header .hint{font-size:0.75em;color:#8b949e}
+.btn{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8em;white-space:nowrap}
+.btn:hover{background:#30363d}
+.btn-primary{background:#238636;border-color:#238636;color:#fff}
+.btn-primary:hover{background:#2ea043}
+.btn-danger{background:#da3633;border-color:#da3633;color:#fff}
+.btn-group{display:flex;gap:6px;flex-wrap:wrap}
+
+.main{display:flex;flex:1;overflow:hidden}
+#map{flex:1;min-height:0}
+.sidebar{width:360px;background:#161b22;border-left:1px solid #30363d;display:flex;flex-direction:column;overflow-y:auto;font-size:0.85em}
+.sidebar-section{padding:14px;border-bottom:1px solid #30363d}
+.sidebar-section h3{color:#d2a8ff;font-size:0.9em;margin-bottom:10px}
+.sidebar-section label{display:block;color:#8b949e;font-size:0.8em;margin:6px 0 2px}
+.sidebar-section input,.sidebar-section select{width:100%;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:6px 8px;border-radius:4px;font-family:monospace;font-size:0.85em}
+.sidebar-section input:focus,.sidebar-section select:focus{border-color:#58a6ff;outline:none}
+.coord-display{background:#0d1117;padding:8px;border-radius:4px;font-family:monospace;font-size:0.8em;line-height:1.6;color:#7ee787}
+.coord-display .dim{color:#8b949e}
+.select-area-btn{width:100%;padding:10px;font-size:0.9em;margin-top:8px}
+#areaInfo{display:none}
+#areaInfo.show{display:block}
+.empty-state{color:#484f58;text-align:center;padding:40px 20px;font-size:0.85em}
+.empty-state .icon{font-size:3em;margin-bottom:10px}
+.leaflet-draw-toolbar a{background-color:#21262d!important;border-color:#30363d!important}
+.leaflet-draw-toolbar a:hover{background-color:#30363d!important}
+.leaflet-draw-actions a{background-color:#161b22!important;color:#c9d1d9!important}
+</style>
+</head>
+<body>
+<div class="header">
+    <div>
+        <h1>光伏并网核查 — 区域框选工具</h1>
+        <span class="hint">点击工具栏 ▢ 按钮框选目标区域 | 支持高德卫星图 / 天地图 / OSM</span>
+    </div>
+    <div class="btn-group">
+        <button class="btn" onclick="resetView()">📍 回到初始坐标</button>
+        <button class="btn" onclick="switchBasemap('amap_sat')">🛰️ 高德卫星</button>
+        <button class="btn" onclick="switchBasemap('amap_road')">🗺️ 高德地图</button>
+        <button class="btn" onclick="switchBasemap('tianditu')">🇨🇳 天地图</button>
+        <button class="btn" onclick="switchBasemap('esri')">🌐 Esri卫星</button>
+    </div>
+</div>
+<div class="main">
+    <div id="map"></div>
+    <div class="sidebar">
+        <div class="sidebar-section">
+            <h3>📌 初始定位</h3>
+            <label>WGS-84 经度</label><input id="initLng" value="120.583515" onchange="goToWGS()">
+            <label>WGS-84 纬度</label><input id="initLat" value="31.986279" onchange="goToWGS()">
+            <label>百度BD-09 经度</label><input id="initBdLng" placeholder="自动换算" readonly>
+            <label>百度BD-09 纬度</label><input id="initBdLat" placeholder="自动换算" readonly>
+            <button class="btn btn-primary select-area-btn" onclick="goToWGS()">🔍 定位到坐标</button>
+        </div>
+
+        <div class="sidebar-section" id="areaInfo">
+            <h3>📐 框选区域信息</h3>
+            <div class="coord-display" id="areaDetails">尚未框选</div>
+            <label>框选日期（用于核查）</label><input type="date" id="checkDate">
+            <label>备案容量 (kW)</label><input type="number" id="capacityKwp" placeholder="例如 100">
+            <button class="btn btn-primary select-area-btn" onclick="submitArea()">✅ 确认选择区域</button>
+        </div>
+
+        <div class="sidebar-section">
+            <h3>📋 操作说明</h3>
+            <div style="color:#8b949e;font-size:0.8em;line-height:1.7">
+                <p>1. 在地图上找到目标位置</p>
+                <p>2. 点击左侧工具栏 <b>▢ 矩形</b> 按钮</p>
+                <p>3. 在地图上拖拽框选光伏区域</p>
+                <p>4. 框选后可拖动角点调整</p>
+                <p>5. 点击 <b>确认选择区域</b></p>
+                <p style="color:#d2991d;margin-top:8px">⚡ 提示: 框选整个光伏阵列</p>
+                <p style="color:#d2991d">区域约 100m×100m 最佳</p>
+            </div>
+        </div>
+
+        <div class="sidebar-section" id="savedAreas" style="display:none">
+            <h3>💾 已选区域</h3>
+            <div id="savedList"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Coordinate transforms
+const PI=Math.PI, A=6378245, EE=0.00669342162296594323;
+function tLat(x,y){let r=-100+2*x+3*y+0.2*y*y+0.1*x*y+0.2*Math.sqrt(Math.abs(x));r+=(20*Math.sin(6*x*PI)+20*Math.sin(2*x*PI))*2/3;r+=(20*Math.sin(y*PI)+40*Math.sin(y/3*PI))*2/3;r+=(160*Math.sin(y/12*PI)+320*Math.sin(y*PI/30))*2/3;return r}
+function tLon(x,y){let r=300+x+2*y+0.1*x*x+0.1*x*y+0.1*Math.sqrt(Math.abs(x));r+=(20*Math.sin(6*x*PI)+20*Math.sin(2*x*PI))*2/3;r+=(20*Math.sin(x*PI)+40*Math.sin(x/3*PI))*2/3;r+=(150*Math.sin(x/12*PI)+300*Math.sin(x/30*PI))*2/3;return r}
+function wgs2gcj(lng,lat){const dLat=tLat(lng-105,lat-35),dLon=tLon(lng-105,lat-35);const r=lat/180*PI;const m=1-EE*Math.sin(r)*Math.sin(r);const s=Math.sqrt(m);return{lng:lng+(dLon*180)/(A/s*Math.cos(r)*PI),lat:lat+(dLat*180)/((A*(1-EE))/(m*s)*PI)}}
+function gcj2bd(lng,lat){const z=Math.sqrt(lng*lng+lat*lat)+0.00002*Math.sin(lat*PI*3000/180);const th=Math.atan2(lat,lng)+0.000003*Math.cos(lng*PI*3000/180);return{lng:z*Math.cos(th)+0.0065,lat:z*Math.sin(th)+0.006}}
+function bd2gcj(lng,lat){const x=lng-0.0065,y=lat-0.006;const z=Math.sqrt(x*x+y*y)-0.00002*Math.sin(y*PI*3000/180);const th=Math.atan2(y,x)-0.000003*Math.cos(x*PI*3000/180);return{lng:z*Math.cos(th),lat:z*Math.sin(th)}}
+function gcj2wgs(lng,lat){let w={lng,lat};for(let i=0;i<5;i++){const t=wgs2gcj(w.lng,w.lat);w.lng+=lng-t.lng;w.lat+=lat-t.lat}return w}
+
+// Initial WGS-84 -> GCJ-02 for map center
+const initGcj = wgs2gcj(120.583515, 31.986279);
+document.getElementById('initBdLng').value = gcj2bd(initGcj.lng, initGcj.lat).lng.toFixed(6);
+document.getElementById('initBdLat').value = gcj2bd(initGcj.lng, initGcj.lat).lat.toFixed(6);
+
+// Tile layers
+const amapSat = L.tileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', {
+    subdomains: ['1','2','3','4'], maxZoom: 18, attribution: '高德卫星图'
+});
+const amapRoad = L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+    subdomains: ['1','2','3','4'], maxZoom: 18, attribution: '高德地图'
+});
+const tiandituSat = L.tileLayer('https://t{s}.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=', {
+    subdomains: ['0','1','2','3','4','5','6','7'], maxZoom: 18, attribution: '天地图'
+});
+const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: 'Esri'
+});
+
+let currentLayer = amapSat;
+const map = L.map('map', {
+    center: [initGcj.lat, initGcj.lng],
+    zoom: 17,
+    layers: [currentLayer],
+    zoomControl: true
+});
+
+// Layer switcher
+const baseLayers = {
+    '高德卫星图': amapSat,
+    '高德地图': amapRoad,
+    '天地图卫星': tiandituSat,
+    'Esri卫星': esriSat,
+};
+L.control.layers(baseLayers, {}, {position:'topright',collapsed:true}).addTo(map);
+
+function switchBasemap(key) {
+    const layerMap = {amap_sat:amapSat, amap_road:amapRoad, tianditu:tiandituSat, esri:esriSat};
+    if (layerMap[key]) { map.removeLayer(currentLayer); currentLayer = layerMap[key]; map.addLayer(currentLayer); }
+}
+
+// Initial marker
+let marker = L.marker([initGcj.lat, initGcj.lng], {draggable:true}).addTo(map);
+marker.bindPopup('<b>初始坐标</b><br>可拖动调整位置<br>或使用框选工具');
+
+marker.on('dragend', function(e) {
+    const gcj = e.target.getLatLng();
+    const wgs = gcj2wgs(gcj.lng, gcj.lat);
+    const bd = gcj2bd(gcj.lng, gcj.lat);
+    document.getElementById('initLng').value = wgs.lng.toFixed(6);
+    document.getElementById('initLat').value = wgs.lat.toFixed(6);
+    document.getElementById('initBdLng').value = bd.lng.toFixed(6);
+    document.getElementById('initBdLat').value = bd.lat.toFixed(6);
+});
+
+function goToWGS() {
+    const lng = parseFloat(document.getElementById('initLng').value);
+    const lat = parseFloat(document.getElementById('initLat').value);
+    if (isNaN(lng)||isNaN(lat)) return;
+    const gcj = wgs2gcj(lng, lat);
+    const bd = gcj2bd(gcj.lng, gcj.lat);
+    document.getElementById('initBdLng').value = bd.lng.toFixed(6);
+    document.getElementById('initBdLat').value = bd.lat.toFixed(6);
+    map.setView([gcj.lat, gcj.lng], 18);
+    marker.setLatLng([gcj.lat, gcj.lng]);
+}
+
+// Rectangle drawing
+const drawnItems = new L.FeatureGroup();
+map.addLayer(drawnItems);
+
+const drawControl = new L.Control.Draw({
+    draw: {
+        polyline: false, polygon: false, circle: false, circlemarker: false, marker: false,
+        rectangle: { shapeOptions: { color: '#00ff88', weight: 2, fillColor: '#00ff88', fillOpacity: 0.1 } }
+    },
+    edit: { featureGroup: drawnItems, edit: { selectedPathOptions: { color: '#ffa500', weight: 3 } } }
+});
+map.addControl(drawControl);
+
+map.on(L.Draw.Event.CREATED, function(e) {
+    drawnItems.clearLayers();
+    drawnItems.addLayer(e.layer);
+    updateAreaInfo(e.layer);
+});
+
+map.on(L.Draw.Event.EDITED, function(e) {
+    e.layers.eachLayer(function(layer) {
+        updateAreaInfo(layer);
+    });
+});
+
+map.on(L.Draw.Event.DELETED, function() {
+    document.getElementById('areaInfo').classList.remove('show');
+    document.getElementById('areaDetails').innerHTML = '<span class="dim">尚未框选区域</span>';
+});
+
+function updateAreaInfo(layer) {
+    const bounds = layer.getBounds();
+    const swGcj = bounds.getSouthWest();
+    const neGcj = bounds.getNorthEast();
+
+    const swWgs = gcj2wgs(swGcj.lng, swGcj.lat);
+    const neWgs = gcj2wgs(neGcj.lng, neGcj.lat);
+
+    const swBd = gcj2bd(swGcj.lng, swGcj.lat);
+    const neBd = gcj2bd(neGcj.lng, neGcj.lat);
+
+    // Approximate size in meters
+    const midLat = (swGcj.lat + neGcj.lat) / 2;
+    const wM = Math.abs(neWgs.lng - swWgs.lng) * 111320 * Math.cos(midLat * PI / 180);
+    const hM = Math.abs(neWgs.lat - swWgs.lat) * 111320;
+    const area = wM * hM;
+
+    document.getElementById('areaInfo').classList.add('show');
+    document.getElementById('areaDetails').innerHTML =
+        '<b>WGS-84 西南角:</b> ' + swWgs.lng.toFixed(6) + ', ' + swWgs.lat.toFixed(6) + '<br>' +
+        '<b>WGS-84 东北角:</b> ' + neWgs.lng.toFixed(6) + ', ' + neWgs.lat.toFixed(6) + '<br>' +
+        '<b>WGS-84 中心:</b> ' + ((swWgs.lng+neWgs.lng)/2).toFixed(6) + ', ' + ((swWgs.lat+neWgs.lat)/2).toFixed(6) + '<br>' +
+        '<b>BD-09 西南角:</b> ' + swBd.lng.toFixed(6) + ', ' + swBd.lat.toFixed(6) + '<br>' +
+        '<b>BD-09 东北角:</b> ' + neBd.lng.toFixed(6) + ', ' + neBd.lat.toFixed(6) + '<br>' +
+        '<b>地面尺寸:</b> ' + wM.toFixed(0) + 'm × ' + hM.toFixed(0) + 'm<br>' +
+        '<b>面积:</b> ' + (area/10000).toFixed(3) + ' 公顷 (' + area.toFixed(0) + ' ㎡)';
+
+    // Also set center to initial position
+    document.getElementById('initLng').value = ((swWgs.lng+neWgs.lng)/2).toFixed(6);
+    document.getElementById('initLat').value = ((swWgs.lat+neWgs.lat)/2).toFixed(6);
+    const bc = gcj2bd((swGcj.lng+neGcj.lng)/2, (swGcj.lat+neGcj.lat)/2);
+    document.getElementById('initBdLng').value = bc.lng.toFixed(6);
+    document.getElementById('initBdLat').value = bc.lat.toFixed(6);
+}
+
+function resetView() {
+    goToWGS();
+    drawnItems.clearLayers();
+    document.getElementById('areaInfo').classList.remove('show');
+}
+
+function submitArea() {
+    if (drawnItems.getLayers().length === 0) {
+        alert('请先在左侧工具栏点击 ▢ 矩形按钮，在地图上框选光伏区域');
+        return;
+    }
+    const layer = drawnItems.getLayers()[0];
+    const bounds = layer.getBounds();
+    const sw = gcj2wgs(bounds.getSouthWest().lng, bounds.getSouthWest().lat);
+    const ne = gcj2wgs(bounds.getNorthEast().lng, bounds.getNorthEast().lat);
+    const centerWgs = { lng: (sw.lng+ne.lng)/2, lat: (sw.lat+ne.lat)/2 };
+
+    const savedDiv = document.getElementById('savedAreas');
+    savedDiv.style.display = 'block';
+    const list = document.getElementById('savedList');
+    const item = document.createElement('div');
+    item.style.cssText = 'background:#0d1117;padding:8px;margin:4px 0;border-radius:4px;font-family:monospace;font-size:0.75em;color:#7ee787';
+    item.innerHTML =
+        '<b>区域 ' + (new Date().toLocaleTimeString()) + '</b><br>' +
+        '中心: ' + centerWgs.lng.toFixed(6) + ', ' + centerWgs.lat.toFixed(6) + '<br>' +
+        '范围: [' + sw.lng.toFixed(6) + ',' + ne.lng.toFixed(6) + '] x [' + sw.lat.toFixed(6) + ',' + ne.lat.toFixed(6) + ']' +
+        '<br><button onclick="navigator.clipboard.writeText(\'' + centerWgs.lng.toFixed(6) + ',' + centerWgs.lat.toFixed(6) + '\')" style="background:#21262d;color:#58a6ff;border:1px solid #30363d;padding:2px 6px;border-radius:3px;cursor:pointer;margin-top:4px;font-size:0.9em">📋 复制中心坐标</button>';
+    list.appendChild(item);
+
+    alert('区域已保存!\n中心坐标(WGS-84): ' + centerWgs.lng.toFixed(6) + ', ' + centerWgs.lat.toFixed(6) +
+        '\n面积: ' + document.getElementById('areaDetails').innerText.match(/面积: ([^\n]+)/)?.[1] || '');
+}
+</script>
+</body>
+</html>

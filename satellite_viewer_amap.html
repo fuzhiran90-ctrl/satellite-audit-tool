@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>卫星地图 - 120.583515°E, 31.986279°N</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:'Segoe UI','Microsoft YaHei',sans-serif;padding:24px}
+h1{color:#58a6ff;font-size:1.3em}
+h2{color:#8b949e;font-size:0.85em;font-weight:normal;margin:4px 0 18px}
+.info{background:#161b22;border-left:3px solid #3fb950;padding:14px 18px;margin:16px 0;border-radius:6px;font-size:0.9em;line-height:1.7}
+.info strong{color:#3fb950}
+.card{background:#161b22;padding:18px;margin:20px 0;border-radius:8px;border:1px solid #30363d}
+.card h3{color:#d2a8ff;margin-bottom:6px}
+.badge{background:#238636;color:#fff;font-size:0.75em;padding:2px 8px;border-radius:10px;margin-left:8px}
+.meta{color:#8b949e;font-size:0.8em;margin:2px 0}
+.card img{max-width:100%;margin-top:12px;border-radius:4px;border:1px solid #30363d;cursor:pointer}
+.note{background:#1a1a0e;border:1px solid #d2991d;padding:14px;margin:24px 0;border-radius:6px;font-size:0.85em;line-height:1.6}
+.note strong{color:#d2991d}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin:10px 0}
+.legend span{font-size:0.8em;color:#8b949e}
+.legend .red{color:#ff4444}.legend .green{color:#00ff88}
+</style>
+</head>
+<body>
+<h1>卫星地图核查视图 — 高德卫星图</h1>
+<h2>WGS-84: 120.583515°E, 31.986279°N | 江苏省苏州市张家港市锦丰镇沿江</h2>
+<div class="info">
+    📍 <strong>WGS-84:</strong> 120.583515°E, 31.986279°N<br>
+    🗺️ <strong>坐标系统:</strong> GCJ-02 (高德/国标) — WGS-84 已自动转换<br>
+    🛰️ <strong>数据源:</strong> 高德卫星图 (webst0{1-4}.is.autonavi.com)<br>
+    🔴 <strong>红色十字</strong> = 目标位置 | <span style="color:#00ff88">绿色虚线圈</span> = 100m 半径
+</div>
+<div class="legend">
+    <span class="red">━━ 红色十字 = 目标坐标</span>
+    <span class="green">┅┅ 绿色虚线圆 = 100m 半径</span>
+    <span>底部 = 100m 比例尺</span>
+</div>
+
+        <div class="card">
+            <h3>z17_overview <span class="badge">1.01m/px</span></h3>
+            <div class="meta">1280x1280px | 覆盖 1297m x 1297m</div>
+            <div class="meta">范围(GCJ-02): [120.58044, 120.59418] x [31.97779, 31.98944]</div>
+            <a href="satellite_amap_z17_overview.jpg" target="_blank"><img src="satellite_amap_z17_overview.jpg" loading="lazy" /></a>
+        </div>
+        <div class="card">
+            <h3>z18_detail <span class="badge">0.51m/px</span></h3>
+            <div class="meta">768x768px | 覆盖 389m x 389m</div>
+            <div class="meta">范围(GCJ-02): [120.58594, 120.59006] x [31.98245, 31.98595]</div>
+            <a href="satellite_amap_z18_detail.jpg" target="_blank"><img src="satellite_amap_z18_detail.jpg" loading="lazy" /></a>
+        </div>
+        <div class="card">
+            <h3>z19_ultra <span class="badge">0.25m/px</span></h3>
+            <div class="meta">768x768px | 覆盖 194m x 195m</div>
+            <div class="meta">范围(GCJ-02): [120.58662, 120.58868] x [31.98304, 31.98478]</div>
+            <a href="satellite_amap_z19_ultra.jpg" target="_blank"><img src="satellite_amap_z19_ultra.jpg" loading="lazy" /></a>
+        </div>
+<div class="note">
+    ⚠️ <strong>注意:</strong><br>
+    • 高德卫星图为当前最新影像，无法回溯历史日期<br>
+    • 430/531 核查需采购 2025年3-6月历史存档影像<br>
+    • z18 (0.5m/px) 即可满足光伏板面积识别，可清楚分辨屋顶光伏阵列
+</div>
+</body>
+</html>
