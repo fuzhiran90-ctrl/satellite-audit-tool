@@ -487,9 +487,9 @@ const CITY_BOUNDARIES={"南京市":[[119.0675,32.4624],[118.8986,32.5605],[118.8
     // 江苏省金色轮廓线
     L.polyline(jsLatLng,{color:'#d2991d',weight:2.5,opacity:0.8,dashArray:'8,4',interactive:false}).addTo(map);
     // 13个地市真实边界（细虚线，GCJ-02 → Leaflet [lat,lng]）
-    const s=document.createElement('style');s.textContent='.city-label{background:rgba(13,17,23,0.75)!important;border:none!important;color:#d2991d!important;font-size:0.68em!important;padding:1px 6px!important;border-radius:3px!important;pointer-events:none}';document.head.appendChild(s);
+    const s=document.createElement('style');s.textContent='.city-label{background:rgba(13,17,23,0.85)!important;border:1px solid #d2991d!important;color:#d2991d!important;font-size:0.78em!important;font-weight:bold!important;padding:2px 8px!important;border-radius:4px!important;pointer-events:none}';document.head.appendChild(s);
     for(const [n,pts] of Object.entries(CITY_BOUNDARIES)){
-        L.polyline(pts.map(([lng,lat])=>[lat,lng]),{color:'#3fb950',weight:1,opacity:0.35,dashArray:'6,4,2,4',interactive:false}).bindTooltip(n,{permanent:true,direction:'center',className:'city-label'}).addTo(map);
+        L.polyline(pts.map(([lng,lat])=>[lat,lng]),{color:'#ff6b6b',weight:1.8,opacity:0.6,dashArray:'6,4',interactive:false}).bindTooltip(n,{permanent:true,direction:'center',className:'city-label'}).addTo(map);
     }
 })();
 
