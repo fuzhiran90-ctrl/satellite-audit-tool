@@ -678,6 +678,26 @@ function gcj2wgs(lng, lat) { let w = { lng, lat }; for (let i = 0; i < 5; i++) {
 // ===================================================================
 let _geocodeRunning = false, _geocodeAborted = false;
 
+// 把高德返回的location字符串写入疑点
+function setCoord(findings, idx, locationStr) {
+    const parts = locationStr.split(',');
+    const wgs = gcj2wgs(parseFloat(parts[0]), parseFloat(parts[1]));
+    findings[idx].lng = Math.round(wgs.lng * 1000000) / 1000000;
+    findings[idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
+}
+
+// 渐进式降级地址：完整→去门牌→去掉路名 → 返回降级列表
+function buildFallbackAddrs(addr) {
+    const result = [];
+    // lv1: 去门牌号/幢/栋
+    const lv1 = addr.replace(/[\d\-\—–]+号.*$/g, '').replace(/[\d]+[幢栋单元楼].*$/g, '').replace(/[（(].*?[)）]/g, '').trim();
+    if (lv1 !== addr && lv1.length > 3) result.push(lv1);
+    // lv2: 去掉路名及其后面的数字
+    const lv2 = addr.replace(/[一-鿿\d]*[路街巷道弄](?:\d.*)?$/u, '').trim();
+    if (lv2 !== addr && lv2.length > 4 && !result.includes(lv2)) result.push(lv2);
+    return result;
+}
+
 // 从地址中提取城市名（用于city参数）
 function extractCity(addr) {
     const m1 = addr.match(/([一-龥]{2,6}(?:市|县|区|旗))/);
@@ -785,7 +805,34 @@ async function testGeocodeOne() {
         }
     } catch(e) { log += '   ❌ 网络错误: ' + e.message + '\n'; }
 
-    log += '\n❌ 两次尝试均失败。请检查:\n';
+    // 第3次：去掉路名只留到镇
+    const lv2 = testItem.addr.replace(/[一-鿿\d]*[路街巷道弄](?:\d.*)?$/u, '').replace(/[（(].*?[)）]/g, '').trim();
+    log += '\n📡 请求3: (降级去路名) ' + lv2 + '\n';
+    try {
+        const c3 = extractCity(lv2);
+        let url3 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+            '&address=' + encodeURIComponent(lv2) + '&output=JSON';
+        if (c3) url3 += '&city=' + encodeURIComponent(c3);
+        const r3 = await fetch(url3), d3 = await r3.json();
+        log += '   响应: status=' + d3.status + ' info=' + (d3.info || '') + ' ' +
+            (d3.geocodes ? 'results=' + d3.geocodes.length : '无结果') + '\n';
+        if ((d3.status === '1' || d3.status === 1) && d3.geocodes && d3.geocodes.length) {
+            const wgs = gcj2wgs(parseFloat(d3.geocodes[0].location.split(',')[0]), parseFloat(d3.geocodes[0].location.split(',')[1]));
+            log += '   ✅ 第3次成功! WGS-84: ' + wgs.lng.toFixed(6) + ', ' + wgs.lat.toFixed(6) + '\n';
+            const save = confirm('✅ 第3次降级成功!\n\n' + log + '\n\n是否保存该坐标到疑点？');
+            if (save) {
+                setCoord(findings, testItem.idx, d3.geocodes[0].location);
+                syncLngLatFields();
+                currentPage = Math.floor(testItem.idx / PAGE_SIZE);
+                renderContent();
+                renderModelList();
+            }
+            testGeocodeShowResult(log, true);
+            return;
+        }
+    } catch(e) { log += '   ❌ 网络错误: ' + e.message + '\n'; }
+
+    log += '\n❌ 三次尝试均失败。请检查:\n';
     log += '  1. 高德Key是否为"Web服务"类型\n';
     log += '  2. Key是否已启用\n';
     log += '  3. 地址是否过于偏僻\n';
@@ -846,8 +893,8 @@ async function testGeocodeBatch(n) {
                 findings[item.idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
                 ok = true; succ++;
             } else {
-                // 降级去门牌号
-                const sa = item.addr.replace(/[\d\-\—–]+号.*$/g, '').replace(/[\d]+幢.*$/g, '').trim();
+                // 降级1：去门牌号（如"6号"→去除，保留"星北路"）
+                const sa = item.addr.replace(/[\d\-\—–]+号.*$/g, '').replace(/[\d]+幢.*$/g, '').replace(/[\d]+栋.*$/g, '').trim();
                 if (sa !== item.addr && sa.length > 3) {
                     const c2 = extractCity(sa);
                     let u2 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
@@ -855,12 +902,26 @@ async function testGeocodeBatch(n) {
                     if (c2) u2 += '&city=' + encodeURIComponent(c2);
                     const r2 = await fetch(u2), d2 = await r2.json();
                     if ((d2.status === '1' || d2.status === 1) && d2.geocodes && d2.geocodes.length) {
-                        const wgs2 = gcj2wgs(parseFloat(d2.geocodes[0].location.split(',')[0]), parseFloat(d2.geocodes[0].location.split(',')[1]));
-                        findings[item.idx].lng = Math.round(wgs2.lng * 1000000) / 1000000;
-                        findings[item.idx].lat = Math.round(wgs2.lat * 1000000) / 1000000;
+                        setCoord(findings, item.idx, d2.geocodes[0].location);
                         ok = true; succ++;
+                    }
+                }
+                if (!ok) {
+                    // 降级2：去掉路名+门牌，只保留行政区划（如"经开区横林镇"→缩小到"常州市"范围搜）
+                    const sa2 = item.addr.replace(/[一-鿿]*[路街巷道弄](?:\d.*)?$/u, '')
+                        .replace(/[\d\-\—–号幢栋单元].*/g, '').replace(/[（(].*?[)）]/g, '').trim();
+                    if (sa2 !== item.addr && sa2.length > 4) {
+                        const c3 = extractCity(sa2) || extractCity(item.addr);
+                        let u3 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+                            '&address=' + encodeURIComponent(sa2) + '&output=JSON';
+                        if (c3) u3 += '&city=' + encodeURIComponent(c3);
+                        const r3 = await fetch(u3), d3 = await r3.json();
+                        if ((d3.status === '1' || d3.status === 1) && d3.geocodes && d3.geocodes.length) {
+                            setCoord(findings, item.idx, d3.geocodes[0].location);
+                            ok = true; succ++;
+                        } else { fail++; }
                     } else { fail++; }
-                } else { fail++; }
+                }
             }
         } catch(e) { fail++; }
 
