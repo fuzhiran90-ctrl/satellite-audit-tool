@@ -616,9 +616,18 @@ function wgs2gcj(lng, lat) { const dLat = _geoTLat(lng-105,lat-35), dLon = _geoT
 function gcj2wgs(lng, lat) { let w = { lng, lat }; for (let i = 0; i < 5; i++) { const t = wgs2gcj(w.lng, w.lat); w.lng += lng - t.lng; w.lat += lat - t.lat; } return w; }
 
 // ===================================================================
-//  批量地址→坐标（使用高德地理编码，需先在主工具中配置高德Key）
+//  批量地址→坐标（高德地理编码，自动提取city参数缩小范围）
 // ===================================================================
 let _geocodeRunning = false, _geocodeAborted = false;
+
+// 从地址中提取城市名（用于city参数）
+function extractCity(addr) {
+    const m1 = addr.match(/([一-龥]{2,6}(?:市|县|区|旗))/);
+    if (m1) return m1[1];
+    const m2 = addr.match(/([一-龥]{2,10})(?:市|县|区|镇|乡|街道)/);
+    if (m2) return m2[1];
+    return '';
+}
 
 async function batchGeocode() {
     const findings = findingsMap[selectedModelId] || [];
@@ -628,12 +637,13 @@ async function batchGeocode() {
     const amapKey = localStorage.getItem('audit_amap_key') || '';
     if (!amapKey) { showToast('请先在主工具页面顶部配置高德Key并保存', true); return; }
 
-    // 统计需要地理编码的疑点（有地址但无坐标的）
+    // 统计需要地理编码的疑点（有地址但无有效坐标的）
     const needGeocode = [];
     findings.forEach((f, i) => {
         const addr = f.addr || f['发电地址'] || f['地址'] || f['位置'] || '';
-        if (addr && String(addr).trim().length > 3 && (!f.lng || !f.lat || f.lng === 0)) {
-            needGeocode.push({ idx: i, addr: String(addr).trim() });
+        if (addr && String(addr).trim().length > 3) {
+            const hasCoord = (f.lng != null && f.lat != null && f.lng !== 0 && f.lat !== 0 && f.lng !== '' && f.lat !== '');
+            if (!hasCoord) needGeocode.push({ idx: i, addr: String(addr).trim() });
         }
     });
 
@@ -642,21 +652,53 @@ async function batchGeocode() {
         return;
     }
 
-    if (!confirm('将为 ' + needGeocode.length + ' 条疑点（无坐标）进行地址→坐标转换。\n\n使用高德地理编码，每秒约10条，预计耗时 ' + Math.ceil(needGeocode.length/10) + ' 秒。\n\n确定开始？')) return;
-
-    // 创建进度弹窗
+    // ★ 先测试：用第一条地址做连通性检查
     showGeocodeProgress(needGeocode.length);
-    _geocodeRunning = true; _geocodeAborted = false;
+    updateGeocodeProgress(0, needGeocode.length, 0, 0);
+    const testAddr = needGeocode[0].addr;
+    const testCity = extractCity(testAddr);
+    let testUrl = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+        '&address=' + encodeURIComponent(testAddr) + '&output=JSON';
+    if (testCity) testUrl += '&city=' + encodeURIComponent(testCity);
+    try {
+        const testR = await fetch(testUrl);
+        const testD = await testR.json();
+        // 诊断：如果失败，告知用户具体原因
+        if (testD.status !== '1' || !(testD.geocodes && testD.geocodes.length)) {
+            const info = testD.info || '未知错误';
+            const detail = document.getElementById('geocodeDetail');
+            if (detail) detail.textContent = '⚠️ 连通测试失败: ' + info + ' (status=' + testD.status + ')';
+            await new Promise(r => setTimeout(r, 3000));
+        }
+    } catch(e) {
+        const detail = document.getElementById('geocodeDetail');
+        if (detail) detail.textContent = '⚠️ 网络错误: ' + e.message;
+        await new Promise(r => setTimeout(r, 3000));
+        finalizeGeocodeProgress(0, needGeocode.length, ['连通测试失败: 请检查网络连接或高德Key是否正确']);
+        return;
+    }
 
+    if (!confirm('将为 ' + needGeocode.length + ' 条疑点进行地址→坐标转换。\n\n使用高德地理编码（自动限定城市范围），约 8条/秒。\n预计耗时 ' + Math.ceil(needGeocode.length/8) + ' 秒。\n\n确定开始？')) {
+        closeGeocodeModal();
+        return;
+    }
+
+    _geocodeRunning = true; _geocodeAborted = false;
     let success = 0, fail = 0;
+    const errors = []; // 记录前几个失败原因
+
     for (let j = 0; j < needGeocode.length; j++) {
         if (_geocodeAborted) break;
         const item = needGeocode[j];
         try {
-            const url = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+            const city = extractCity(item.addr);
+            let url = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
                 '&address=' + encodeURIComponent(item.addr) + '&output=JSON';
+            if (city) url += '&city=' + encodeURIComponent(city);
+
             const r = await fetch(url), d = await r.json();
-            if (d.status === '1' && d.geocodes && d.geocodes.length) {
+            // 放宽条件：status可能是字符串"1"或数字1
+            if ((d.status === '1' || d.status === 1) && d.geocodes && d.geocodes.length) {
                 const loc = d.geocodes[0].location.split(',');
                 const gcjLng = parseFloat(loc[0]), gcjLat = parseFloat(loc[1]);
                 const wgs = gcj2wgs(gcjLng, gcjLat);
@@ -664,34 +706,37 @@ async function batchGeocode() {
                 findings[item.idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
                 success++;
             } else {
-                // 降级：尝试去掉地址尾部再搜
-                const shortAddr = item.addr.replace(/[\d\-]+号.*$/, '').trim();
+                // 降级1：去掉详细门牌号
+                const shortAddr = item.addr.replace(/[\d\-\—–]+号.*$/g, '').replace(/[\d]+幢.*$/g, '').replace(/[\d]+栋.*$/g, '').replace(/[\d]+单元.*$/g, '').trim();
                 if (shortAddr !== item.addr && shortAddr.length > 3) {
-                    const url2 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+                    const city2 = extractCity(shortAddr);
+                    let url2 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
                         '&address=' + encodeURIComponent(shortAddr) + '&output=JSON';
+                    if (city2) url2 += '&city=' + encodeURIComponent(city2);
                     const r2 = await fetch(url2), d2 = await r2.json();
-                    if (d2.status === '1' && d2.geocodes && d2.geocodes.length) {
+                    if ((d2.status === '1' || d2.status === 1) && d2.geocodes && d2.geocodes.length) {
                         const loc2 = d2.geocodes[0].location.split(',');
                         const gcjLng2 = parseFloat(loc2[0]), gcjLat2 = parseFloat(loc2[1]);
                         const wgs2 = gcj2wgs(gcjLng2, gcjLat2);
                         findings[item.idx].lng = Math.round(wgs2.lng * 1000000) / 1000000;
                         findings[item.idx].lat = Math.round(wgs2.lat * 1000000) / 1000000;
                         success++;
-                    } else { fail++; }
-                } else { fail++; }
+                    } else { fail++; if (errors.length < 5) errors.push(item.addr.substring(0, 40) + '... → ' + (d.info || d2.info || '无结果')); }
+                } else { fail++; if (errors.length < 5) errors.push(item.addr.substring(0, 40) + '... → ' + (d.info || '无结果')); }
             }
-        } catch(e) { fail++; }
-        // 更新进度
+        } catch(e) { fail++; if (errors.length < 3) errors.push('网络错误: ' + e.message); }
         updateGeocodeProgress(j + 1, needGeocode.length, success, fail);
-        // 速率控制：约每秒10次
-        if (j % 8 === 0 && j > 0) await new Promise(r => setTimeout(r, 1000));
+        // 每50条自动保存，防止意外中断丢失进度
+        if ((j + 1) % 50 === 0) saveData();
+        // 速率控制：~7条/秒，3000条约7分钟，避免触发限流
+        if (j % 7 === 0 && j > 0) await new Promise(r => setTimeout(r, 1000));
     }
 
     _geocodeRunning = false;
     saveData();
     renderContent();
     renderModelList();
-    finalizeGeocodeProgress(success, fail);
+    finalizeGeocodeProgress(success, fail, errors);
 }
 
 // 进度弹窗
@@ -729,15 +774,29 @@ function abortGeocode() {
     if (status) status.textContent = '⏸ 已中止，正在保存已处理的数据...';
 }
 
-function finalizeGeocodeProgress(success, fail) {
+function closeGeocodeModal() {
+    const overlay = document.getElementById('geocodeModal');
+    if (overlay) overlay.style.display = 'none';
+}
+
+function finalizeGeocodeProgress(success, fail, errors) {
     const overlay = document.getElementById('geocodeModal');
     if (!overlay) return;
-    overlay.innerHTML = '<div class="modal" style="width:450px;text-align:center">' +
-        '<h3 style="color:#3fb950">✅ 批量地理编码完成</h3>' +
-        '<div style="font-size:1.2em;margin:16px 0;color:#c9d1d9">📍 成功 <b style="color:#3fb950">' + success + '</b> 条 | 失败 <b style="color:#ff7b72">' + fail + '</b> 条</div>' +
-        '<div style="color:#8b949e;font-size:0.78em">坐标已保存为WGS-84格式</div>' +
-        '<button class="btn-accent" onclick="document.getElementById(\'geocodeModal\').style.display=\'none\'" style="margin-top:12px">关闭</button>' +
+    const errList = (errors && errors.length) ? errors : [];
+    let html = '<div class="modal" style="width:500px;max-width:95vw;text-align:center;max-height:80vh;overflow-y:auto">' +
+        '<h3 style="color:' + (success > 0 ? '#3fb950' : '#ff7b72') + '">' + (success > 0 ? '✅' : '❌') + ' 批量地理编码完成</h3>' +
+        '<div style="font-size:1.2em;margin:16px 0;color:#c9d1d9">📍 成功 <b style="color:#3fb950">' + success + '</b> 条 | 失败 <b style="color:#ff7b72">' + fail + '</b> 条</div>';
+    if (errList.length > 0) {
+        html += '<div style="text-align:left;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;margin-bottom:12px;max-height:160px;overflow-y:auto">';
+        html += '<div style="color:#ff7b72;font-size:0.75em;margin-bottom:4px">⚠️ 失败原因示例：</div>';
+        errList.forEach(e => { html += '<div style="color:#8b949e;font-size:0.7em;padding:2px 0;border-bottom:1px solid #21262d">' + escHtml(e) + '</div>'; });
+        if (fail > errList.length) html += '<div style="color:#484f58;font-size:0.7em;padding:2px 0">… 及其他' + (fail - errList.length) + '条</div>';
+        html += '</div>';
+    }
+    html += '<div style="color:#8b949e;font-size:0.78em">坐标已保存为WGS-84格式</div>' +
+        '<button class="btn-accent" onclick="closeGeocodeModal()" style="margin-top:12px">关闭</button>' +
         '</div>';
+    overlay.innerHTML = html;
 }
 
 let editFindingModal = null;
