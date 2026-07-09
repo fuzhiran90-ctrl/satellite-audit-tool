@@ -650,38 +650,57 @@ function toggleSelectAll() {
     renderContent();
 }
 
-// 单次地理编码请求（带重试 + 限速标记）
+// 单次地理编码请求
+// 策略：完整地址 → (失败) 去门牌 → (失败) 去路名，每个变体发1次
+// 仅在网络错误时重试1次（非"无结果"），避免浪费高德额度
 // 返回 { ok, wgs, level } 或 { ok: false, reason }
 async function requestGeocodeOne(addr, amapKey) {
-    const city = extractCity(addr);
-    let lastError = '';
-
-    // 三条地址变体依次尝试
-    const variants = [addr, ...buildFallbackAddrs(addr)];
+    const baseCity = extractCity(addr);
+    const variants = [addr, ...buildFallbackAddrs(addr)]; // 最多3个变体
+    let lastReason = '';
 
     for (const v of variants) {
-        const c = extractCity(v) || city;
+        const c = extractCity(v) || baseCity;
         let url = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
             '&address=' + encodeURIComponent(v) + '&output=JSON';
         if (c) url += '&city=' + encodeURIComponent(c);
 
-        // 每条变体最多重试2次
-        for (let retry = 0; retry < 2; retry++) {
+        // 发1次请求
+        let resp = null;
+        let isNetErr = false;
+        try {
+            resp = await fetch(url);
+            const d = await resp.json();
+            if ((d.status === '1' || d.status === 1) && d.geocodes && d.geocodes.length) {
+                const wgs = gcj2wgs(
+                    parseFloat(d.geocodes[0].location.split(',')[0]),
+                    parseFloat(d.geocodes[0].location.split(',')[1])
+                );
+                return { ok: true, wgs, level: d.geocodes[0].level || '' };
+            }
+            lastReason = 'status=' + d.status + ' ' + (d.info || '无结果');
+        } catch(e) {
+            isNetErr = true;
+            lastReason = '网络错误';
+        }
+
+        // 仅网络错误时重试一次（网络抖动），API 明确返回"无结果"不重试直接降级
+        if (isNetErr) {
+            await new Promise(r => setTimeout(r, 800));
             try {
-                if (retry > 0) await new Promise(r => setTimeout(r, 800)); // 重试前等待
-                const r = await fetch(url), d = await r.json();
-                if ((d.status === '1' || d.status === 1) && d.geocodes && d.geocodes.length) {
+                const r2 = await fetch(url);
+                const d2 = await r2.json();
+                if ((d2.status === '1' || d2.status === 1) && d2.geocodes && d2.geocodes.length) {
                     const wgs = gcj2wgs(
-                        parseFloat(d.geocodes[0].location.split(',')[0]),
-                        parseFloat(d.geocodes[0].location.split(',')[1])
+                        parseFloat(d2.geocodes[0].location.split(',')[0]),
+                        parseFloat(d2.geocodes[0].location.split(',')[1])
                     );
-                    return { ok: true, wgs, level: d.geocodes[0].level || '' };
+                    return { ok: true, wgs, level: d2.geocodes[0].level || '' };
                 }
-                lastError = 'code=' + d.status + ' info=' + (d.info || '无结果');
-            } catch(e) { lastError = '网络错误: ' + e.message; }
+            } catch(e) {}
         }
     }
-    return { ok: false, reason: lastError };
+    return { ok: false, reason: lastReason };
 }
 
 // 统一测试按钮：对勾选中的条目执行地理编码
