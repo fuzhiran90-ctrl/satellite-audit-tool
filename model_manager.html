@@ -688,7 +688,7 @@ async function testGeocodeOne() {
             if (save) {
                 findings[testItem.idx].lng = Math.round(wgs.lng * 1000000) / 1000000;
                 findings[testItem.idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
-                saveData();
+                syncLngLatFields();
                 renderContent();
                 renderModelList();
             }
@@ -717,7 +717,7 @@ async function testGeocodeOne() {
             if (save) {
                 findings[testItem.idx].lng = Math.round(wgs.lng * 1000000) / 1000000;
                 findings[testItem.idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
-                saveData();
+                syncLngLatFields();
                 renderContent();
                 renderModelList();
             }
@@ -741,6 +741,26 @@ function testGeocodeShowResult(log, success) {
         '<pre style="background:#0d1117;color:#7ee787;border:1px solid #30363d;border-radius:6px;padding:12px;margin:12px 0;font-size:0.75em;line-height:1.7;white-space:pre-wrap;max-height:400px;overflow-y:auto;font-family:monospace">' + escHtml(log) + '</pre>' +
         '<button class="btn-accent" onclick="closeGeocodeModal()" style="width:100%">关闭</button>' +
         '</div>';
+}
+
+// 自动同步模型字段：确保经度、纬度字段存在于模型配置末尾
+function syncLngLatFields() {
+    const m = models.find(x => x.id === selectedModelId);
+    if (!m) return;
+    const fields = (m.fields || '').split(',').map(s => s.trim()).filter(Boolean);
+    let changed = false;
+    if (!fields.includes('经度') && !fields.some(f => /经度|lng/i.test(f))) {
+        fields.push('经度');
+        changed = true;
+    }
+    if (!fields.includes('纬度') && !fields.some(f => /纬度|lat/i.test(f))) {
+        fields.push('纬度');
+        changed = true;
+    }
+    if (changed) {
+        m.fields = fields.join(',');
+        saveData();
+    }
 }
 
 async function batchGeocode() {
@@ -847,7 +867,7 @@ async function batchGeocode() {
     }
 
     _geocodeRunning = false;
-    saveData();
+    syncLngLatFields();
     renderContent();
     renderModelList();
     finalizeGeocodeProgress(success, fail, errors);
@@ -1113,7 +1133,7 @@ function importFindingsJSON() {
                 } else {
                     findingsMap[selectedModelId] = (findingsMap[selectedModelId] || []).concat(data);
                 }
-                saveData();
+                syncLngLatFields();
                 renderContent();
                 renderModelList();
                 showToast('已导入 ' + data.length + ' 条疑点');
