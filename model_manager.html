@@ -366,6 +366,8 @@ function renderContent() {
         if (findings.length > 0) {
             const selCount = _selectedRows.size;
             html += '<button class="btn-accent" onclick="geocodeSelected()" ' + (selCount === 0 ? 'disabled' : '') + '>📍 测试勾选(' + selCount + '条)</button>';
+            html += '<button class="btn-normal" onclick="selectAllWithCoords()" title="全选已有经纬度坐标的条目">✅ 全选有坐标</button>';
+            html += '<button class="btn-normal" onclick="selectAllNoCoords()" title="全选缺少经纬度坐标的条目">⬜ 全选无坐标</button>';
             html += '<button class="btn-danger" onclick="batchClearFindings()">🗑 批量清空</button>';
         }
         html += '</div></div>';
@@ -664,6 +666,34 @@ function toggleSelectAll() {
         if (cb) cb.checked = _selectedRows.has(i);
     }
     refreshSelectBtn();
+}
+
+// 全选已有坐标的条目（跨所有页）
+function selectAllWithCoords() {
+    const findings = findingsMap[selectedModelId] || [];
+    let count = 0;
+    findings.forEach((f, i) => {
+        const hasCoord = (f.lng != null && f.lat != null && f.lng !== 0 && f.lat !== 0 && f.lng !== '' && f.lat !== '');
+        if (hasCoord) { _selectedRows.add(i); count++; }
+    });
+    refreshSelectBtn();
+    renderContent();
+    showToast('已选中 ' + count + ' 条有坐标疑点');
+}
+
+// 全选缺少坐标的条目（跨所有页）
+function selectAllNoCoords() {
+    const findings = findingsMap[selectedModelId] || [];
+    let count = 0;
+    findings.forEach((f, i) => {
+        const hasCoord = (f.lng != null && f.lat != null && f.lng !== 0 && f.lat !== 0 && f.lng !== '' && f.lat !== '');
+        if (!hasCoord && (f.addr || f['发电地址'] || f['地址'] || '').length > 3) {
+            _selectedRows.add(i); count++;
+        }
+    });
+    refreshSelectBtn();
+    renderContent();
+    showToast('已选中 ' + count + ' 条无坐标疑点');
 }
 
 // 更新测试按钮文字和状态（轻量DOM操作，不重建页面）
