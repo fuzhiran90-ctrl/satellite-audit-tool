@@ -208,6 +208,9 @@ let models = [];
 let findingsMap = {}; // { modelId: [finding, ...] }
 let selectedModelId = null;
 let activeTab = 'model'; // 'model' | 'findings'
+let currentPage = 0;      // 疑点清单当前分页
+const PAGE_SIZE = 100;    // 每页显示条数
+let _saveTimer = null;    // 防抖保存定时器
 
 // ===================================================================
 //  Init
@@ -239,6 +242,10 @@ function loadData() {
 function saveData() {
     localStorage.setItem(STORAGE_KEY_MODELS, JSON.stringify(models));
     localStorage.setItem(STORAGE_KEY_FINDINGS, JSON.stringify(findingsMap));
+}
+function saveDataDebounced() {
+    if (_saveTimer) clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(() => { saveData(); _saveTimer = null; }, 500);
 }
 
 // ===================================================================
@@ -286,6 +293,8 @@ function renderModelList() {
 
 function selectModel(id) {
     selectedModelId = id;
+    currentPage = 0;
+    editingFindingIdx = -1;
     renderModelList();
     renderContent();
 }
@@ -353,32 +362,63 @@ function renderContent() {
         if (findings.length === 0) {
             html += '<div style="text-align:center;padding:40px;color:#484f58">暂无疑点数据<br><button class="btn-primary" style="margin-top:12px" onclick="addFinding()">＋ 添加第一条疑点</button></div>';
         } else {
+            // ★ 分页: 只渲染当前页数据，3000+条也不会卡
+            const totalPages = Math.ceil(findings.length / PAGE_SIZE);
+            if (currentPage >= totalPages) currentPage = totalPages - 1;
+            if (currentPage < 0) currentPage = 0;
+            const startIdx = currentPage * PAGE_SIZE;
+            const endIdx = Math.min(startIdx + PAGE_SIZE, findings.length);
+            const pageFindings = findings.slice(startIdx, endIdx);
+
             html += '<div class="table-wrap"><table><thead><tr>';
             html += '<th style="width:30px">#</th>';
-            // Build columns from fields config — 表头用中文字段名
             const cols = buildColumns(findings);
             const mForLabel = models.find(x => x.id === selectedModelId);
             cols.forEach(col => { html += '<th>' + escHtml(colLabel(col, mForLabel)) + '</th>'; });
             html += '<th style="width:80px">操作</th>';
             html += '</tr></thead><tbody>';
-            findings.forEach((f, i) => {
+
+            for (let pi = 0; pi < pageFindings.length; pi++) {
+                const f = pageFindings[pi];
+                const i = startIdx + pi; // 原始索引
                 html += '<tr id="findingRow-' + i + '" class="' + (editingFindingIdx === i ? 'selected' : '') + '">';
-                html += '<td style="color:#484f58">' + (i+1) + '</td>';
+                html += '<td style="color:#484f58">' + (i + 1) + '</td>';
                 cols.forEach(col => {
                     const val = f[col] != null ? f[col] : '';
                     html += '<td><input class="cell-input' + (typeof val === 'number' ? ' num' : '') + '" value="' + escHtml(String(val)) + '" onchange="onFindingCellChange(' + i + ',\'' + col + '\',this.value)" data-col="' + col + '" data-row="' + i + '"></td>';
                 });
                 html += '<td class="actions-cell">';
-                // 附件指示器
                 const attCount = (Array.isArray(f.attachments) ? f.attachments.length : 0);
                 const attIcon = attCount > 0 ? '<span title="' + attCount + '个附件" style="cursor:pointer;margin-right:4px" onclick="editFindingRow(' + i + ')">📎' + attCount + '</span>' : '';
                 html += attIcon;
                 html += '<button onclick="editFindingRow(' + i + ')" title="编辑整行">✏️</button>';
                 html += '<button class="danger" onclick="deleteFinding(' + i + ')" title="删除">🗑</button>';
                 html += '</td></tr>';
-            });
+            }
             html += '</tbody></table></div>';
-            html += '<div class="help">💡 直接在表格中修改单元格数值，或点击 ✏️ 编辑完整行。修改后自动保存到本地存储。</div>';
+
+            // ★ 分页导航
+            if (totalPages > 1) {
+                html += '<div style="display:flex;align-items:center;justify-content:center;gap:4px;margin-top:8px;padding:6px 0;flex-wrap:wrap">';
+                html += '<button class="btn-normal" style="padding:4px 10px;font-size:0.72em" onclick="goPage(0)" ' + (currentPage === 0 ? 'disabled' : '') + '>⏮ 首页</button>';
+                html += '<button class="btn-normal" style="padding:4px 10px;font-size:0.72em" onclick="goPage(' + (currentPage - 1) + ')" ' + (currentPage === 0 ? 'disabled' : '') + '>◀ 上一页</button>';
+
+                // 页码按钮（显示附近页码）
+                const pgStart = Math.max(0, currentPage - 3);
+                const pgEnd = Math.min(totalPages, currentPage + 4);
+                if (pgStart > 0) html += '<span style="color:#484f58;font-size:0.72em">…</span>';
+                for (let pg = pgStart; pg < pgEnd; pg++) {
+                    html += '<button class="btn-normal" style="padding:4px 8px;font-size:0.72em;min-width:28px;' +
+                        (pg === currentPage ? 'background:#7c3aed;color:#fff;border-color:#7c3aed' : '') +
+                        '" onclick="goPage(' + pg + ')">' + (pg + 1) + '</button>';
+                }
+                if (pgEnd < totalPages) html += '<span style="color:#484f58;font-size:0.72em">…</span>';
+
+                html += '<button class="btn-normal" style="padding:4px 10px;font-size:0.72em" onclick="goPage(' + (currentPage + 1) + ')" ' + (currentPage >= totalPages - 1 ? 'disabled' : '') + '>下一页 ▶</button>';
+                html += '<button class="btn-normal" style="padding:4px 10px;font-size:0.72em" onclick="goPage(' + (totalPages - 1) + ')" ' + (currentPage >= totalPages - 1 ? 'disabled' : '') + '>末页 ⏭</button>';
+                html += '<span style="color:#8b949e;font-size:0.7em;margin-left:4px">' + (currentPage + 1) + '/' + totalPages + ' 页 | ' + findings.length + ' 条</span>';
+                html += '</div>';
+            }
         }
     }
 
@@ -387,6 +427,8 @@ function renderContent() {
 
 function switchTab(tab) {
     activeTab = tab;
+    currentPage = 0;
+    editingFindingIdx = -1;
     renderContent();
 }
 
@@ -556,10 +598,24 @@ let editingFindingIdx = -1;
 function onFindingCellChange(rowIdx, col, value) {
     const findings = findingsMap[selectedModelId] || [];
     if (rowIdx < 0 || rowIdx >= findings.length) return;
-    // Try to parse as number
     const numVal = parseFloat(value);
     findings[rowIdx][col] = isNaN(numVal) ? value : numVal;
-    saveData();
+    saveDataDebounced();  // 防抖保存，避免频繁写localStorage
+}
+
+// 分页跳转
+function goPage(pg) {
+    const findings = findingsMap[selectedModelId] || [];
+    const totalPages = Math.ceil(findings.length / PAGE_SIZE);
+    if (pg < 0) pg = 0;
+    if (pg >= totalPages) pg = totalPages - 1;
+    if (pg === currentPage) return;
+    currentPage = pg;
+    editingFindingIdx = -1;
+    renderContent();
+    // 滚动到表格顶部
+    const tbl = document.querySelector('.table-wrap');
+    if (tbl) tbl.scrollIntoView({ behavior: 'smooth' });
 }
 
 function addFinding() {
