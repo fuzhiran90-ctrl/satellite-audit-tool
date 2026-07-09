@@ -746,6 +746,7 @@ async function testGeocodeOne() {
                 findings[testItem.idx].lng = Math.round(wgs.lng * 1000000) / 1000000;
                 findings[testItem.idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
                 syncLngLatFields();
+                currentPage = Math.floor(testItem.idx / PAGE_SIZE);
                 renderContent();
                 renderModelList();
             }
@@ -775,6 +776,7 @@ async function testGeocodeOne() {
                 findings[testItem.idx].lng = Math.round(wgs.lng * 1000000) / 1000000;
                 findings[testItem.idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
                 syncLngLatFields();
+                currentPage = Math.floor(testItem.idx / PAGE_SIZE);
                 renderContent();
                 renderModelList();
             }
@@ -871,10 +873,13 @@ async function testGeocodeBatch(n) {
     const totalMs = Math.round(performance.now() - startTime);
     syncLngLatFields();
     saveData();
+    // 跳到第一条测试数据所在页
+    const firstTestIdx = batch[0].idx;
+    currentPage = Math.floor(firstTestIdx / PAGE_SIZE);
     renderContent();
     renderModelList();
 
-    // 显示详细性能报告
+    // 显示详细性能报告 + 坐标结果
     const quickest = Math.min(...timings.map(t => t.ms));
     const slowest = Math.max(...timings.map(t => t.ms));
     const avgMs = Math.round(timings.reduce((s, t) => s + t.ms, 0) / timings.length * 10) / 10;
@@ -886,20 +891,23 @@ async function testGeocodeBatch(n) {
     log += '平均耗时: ' + avgMs + 'ms/条\n';
     log += '最快:     ' + quickest + 'ms | 最慢: ' + slowest + 'ms\n';
     log += '估算速率: ' + reqsPerSec + ' 条/秒\n';
-    log += '内存估算: ' + (findings[0] ? Math.round(JSON.stringify(findings[0]).length / 1024) : '?') + ' KB/条\n';
     log += '成功: ' + succ + ' | 失败: ' + fail + '\n';
-    log += '━━━━━━━━━━━━━━━━━━━━━━━━━\n\n逐条详情:\n';
+    log += '━━━━━━━━━━━━━━━━━━━━━━━━━\n\n逐条结果（坐标已写入疑点明细）:\n';
     timings.forEach((t, i) => {
+        const f = findings[batch[i].idx];
+        const coord = f.lng ? ('lng=' + f.lng.toFixed(6) + ' lat=' + f.lat.toFixed(6)) : '(未获取)';
         log += (i + 1).toString().padStart(2) + '. [' + (t.ok ? '✅' : '❌') + ' ' + t.ms + 'ms] ' + t.addr + '\n';
+        if (t.ok) log += '    → ' + coord + '\n';
     });
 
     const overlay = document.getElementById('geocodeModal');
     if (overlay) {
-        overlay.innerHTML = '<div class="modal" style="width:580px;max-width:95vw;text-align:left">' +
-            '<h3 style="color:#3fb950">⏱ 性能测试完成</h3>' +
-            '<pre style="background:#0d1117;color:#7ee787;border:1px solid #30363d;border-radius:6px;padding:12px;margin:12px 0;font-size:0.73em;line-height:1.7;white-space:pre-wrap;max-height:340px;overflow-y:auto;font-family:monospace">' + escHtml(log) + '</pre>' +
-            '<button class="btn-accent" onclick="closeGeocodeModal()" style="width:100%">关闭</button>' +
-            '</div>';
+        overlay.innerHTML = '<div class="modal" style="width:620px;max-width:95vw;text-align:left">' +
+            '<h3 style="color:#3fb950">⏱ 性能测试完成 — 坐标已写入</h3>' +
+            '<pre style="background:#0d1117;color:#7ee787;border:1px solid #30363d;border-radius:6px;padding:12px;margin:12px 0;font-size:0.72em;line-height:1.6;white-space:pre-wrap;max-height:350px;overflow-y:auto;font-family:monospace">' + escHtml(log) + '</pre>' +
+            '<div style="display:flex;gap:8px">' +
+            '<button class="btn-accent" onclick="closeGeocodeModal()" style="flex:1">关闭查看表格</button>' +
+            '</div></div>';
     }
 }
 
@@ -1294,6 +1302,7 @@ function importFindingsJSON() {
                     findingsMap[selectedModelId] = (findingsMap[selectedModelId] || []).concat(data);
                 }
                 syncLngLatFields();
+                currentPage = Math.floor(testItem.idx / PAGE_SIZE);
                 renderContent();
                 renderModelList();
                 showToast('已导入 ' + data.length + ' 条疑点');
