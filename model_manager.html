@@ -141,6 +141,8 @@ td .cell-input.num{width:70px;text-align:right}
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
+
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script>
 // ===================================================================
 //  Storage key
@@ -337,8 +339,13 @@ function renderContent() {
         html += '<span class="badge" id="findingBadge">' + findings.length + '</span>';
         html += '<div class="section-actions">';
         html += '<button class="btn-normal" onclick="addFinding()">＋ 添加疑点</button>';
-        html += '<button class="btn-normal" onclick="importFindingsJSON()">📤 导入疑点JSON</button>';
-        html += '<button class="btn-normal" onclick="exportFindingsJSON()">📥 导出疑点JSON</button>';
+        html += '<button class="btn-normal" onclick="document.getElementById(\'excelFileInput\').click()">📥 导入Excel</button>';
+        html += '<input type="file" id="excelFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importExcelFile(event)">';
+        html += '<button class="btn-normal" onclick="importFindingsJSON()">📤 导入JSON</button>';
+        html += '<button class="btn-normal" onclick="exportFindingsJSON()">📥 导出JSON</button>';
+        if (findings.length > 0) {
+            html += '<button class="btn-danger" onclick="batchClearFindings()">🗑 批量清空</button>';
+        }
         html += '</div></div>';
 
         if (findings.length === 0) {
@@ -403,7 +410,17 @@ function buildColumns(findings) {
         '林班编号':'id','砍伐面积(ha)':'cutArea','审批面积(ha)':'approvedArea','差异面积(ha)':'diffArea',
         '堆放点编号':'id','占地面积(m²)':'area','疑似类型':'suspectType','距离居民区(m)':'distToResident',
         '岸段编号':'id','变化长度(m)':'changeLength','变化类型':'changeType','变化速率(m/年)':'changeRate','是否审批':'isApproved',
-        '坐标':'lat','位置坐标':'addr'
+        '坐标':'lat','位置坐标':'addr',
+        // Excel常见表头映射（光伏审计数据等）
+        '供电单位一级':'dept1','供电单位二级':'dept2','供电单位三级':'dept3',
+        '发电客户编号':'id','用户编号':'userId','用户名称':'userName',
+        '发电地址':'addr','发电客户名称':'name',
+        '并网日期':'gridDate','并网日期(day)':'gridDate',
+        '装机容量':'capacity','装机容量(kW)':'capacity',
+        '发电量消纳方式':'consumptionMode','并网电压等级':'voltageLevel',
+        '纳税人类型':'taxpayerType','发电客户统计时段内最大月发电小时数':'monthlyHours',
+        '月发电小时数':'monthlyHours','发电小时数':'monthlyHours',
+        '户号':'id','台区名称':'transformerName','台区编号':'transformerId'
     };
 
     // ★ 严格按模型 fields 配置的顺序生成列
@@ -725,14 +742,6 @@ function closeEditModal() {
     editingFindingIdx = -1;
 }
 
-function closeEditModal() {
-    if (editFindingModal) {
-        editFindingModal.style.display = 'none';
-        editFindingModal = null;
-    }
-    editingFindingIdx = -1;
-}
-
 function saveEditModal(idx) {
     const findings = findingsMap[selectedModelId] || [];
     if (idx < 0 || idx >= findings.length) return;
@@ -807,6 +816,181 @@ function importFindingsJSON() {
         reader.readAsText(file);
     };
     input.click();
+}
+
+// ===================================================================
+//  Excel批量导入 — 自动识别表头 + 同步模型字段配置
+// ===================================================================
+
+// 中文字段名 → 英文 key 统一映射（供Excel导入和buildColumns共用）
+function getFieldKeyMap() {
+    return {
+        '户名':'name','地址':'addr','并网容量(kW)':'capacity','并网容量':'capacity',
+        '并网时间':'gridDate','月均发电小时':'monthlyHours','编号':'id',
+        '经度':'lng','纬度':'lat','容量':'capacity','月发电':'monthlyHours',
+        '电站名称':'name','装机容量(MW)':'capacity','占地类型':'landType','合规状态':'compliance',
+        '地块编号':'id','位置':'addr','占地面积(亩)':'area','原用途':'origUse','现用途':'curUse','变化年份':'changeYear',
+        '水体名称':'name','面积(km²)':'area','水质等级':'waterGrade','异常类型':'anomalyType','检测时间':'detectDate',
+        '区域名称':'name','变化面积(ha)':'area','NDVI变化量':'ndviChange','变化时间段':'changePeriod','疑似原因':'suspectedCause',
+        '项目名称':'name','规划面积(ha)':'planArea','实际面积(ha)':'actualArea','超出比例':'exceedRatio','发现时间':'detectDate',
+        '矿山名称':'name','矿权面积(ha)':'rightsArea','越界面积(ha)':'overArea','越界方向':'overDir',
+        '林班编号':'id','砍伐面积(ha)':'cutArea','审批面积(ha)':'approvedArea','差异面积(ha)':'diffArea',
+        '堆放点编号':'id','占地面积(m²)':'area','疑似类型':'suspectType','距离居民区(m)':'distToResident',
+        '岸段编号':'id','变化长度(m)':'changeLength','变化类型':'changeType','变化速率(m/年)':'changeRate','是否审批':'isApproved',
+        '坐标':'lat','位置坐标':'addr',
+        '供电单位一级':'dept1','供电单位二级':'dept2','供电单位三级':'dept3',
+        '发电客户编号':'id','用户编号':'userId','用户名称':'userName',
+        '发电地址':'addr','发电客户名称':'name',
+        '并网日期':'gridDate','并网日期(day)':'gridDate',
+        '装机容量':'capacity','装机容量(kW)':'capacity',
+        '发电量消纳方式':'consumptionMode','并网电压等级':'voltageLevel',
+        '纳税人类型':'taxpayerType','发电客户统计时段内最大月发电小时数':'monthlyHours',
+        '月发电小时数':'monthlyHours','发电小时数':'monthlyHours',
+        '户号':'id','台区名称':'transformerName','台区编号':'transformerId'
+    };
+}
+
+// 点击"导入Excel"按钮 → 文件对话框 → 解析 → 预览确认 → 导入
+function importExcelFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const wb = XLSX.read(e.target.result, { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+            if (!rows.length) { showToast('文件为空', true); return; }
+
+            // 第一行 = 表头
+            const headers = rows[0].map(h => String(h || '').trim()).filter(Boolean);
+            if (!headers.length) { showToast('未检测到表头', true); return; }
+
+            // 数据行（跳过空行）
+            const dataRows = rows.slice(1).filter(r => r.some(c => String(c || '').trim() !== ''));
+            if (!dataRows.length) { showToast('无数据行', true); return; }
+
+            // 将表头映射为字段key
+            const fkMap = getFieldKeyMap();
+            const colKeys = headers.map(h => fkMap[h] || h);
+
+            // 解析所有数据行
+            const parsed = dataRows.map(row => {
+                const obj = {};
+                headers.forEach((h, i) => {
+                    const key = colKeys[i];
+                    let val = row[i] != null ? String(row[i]).trim() : '';
+                    // 尝试转为数字
+                    const num = parseFloat(val);
+                    obj[key] = (!isNaN(num) && val !== '' && !/^[一-鿿]/.test(val)) ? num : val;
+                });
+                return obj;
+            });
+
+            // 显示预览确认弹窗
+            showImportPreview(headers, colKeys, parsed);
+        } catch(ex) {
+            showToast('文件解析失败: ' + ex.message, true);
+        }
+    };
+    reader.readAsArrayBuffer(file);
+    event.target.value = '';
+}
+
+// 预览弹窗 — 展示表头映射 + 数据概览
+function showImportPreview(headers, colKeys, data) {
+    const m = models.find(x => x.id === selectedModelId);
+    const modelName = m ? m.name : '当前模型';
+
+    // 构建表头映射预览
+    let mappingHtml = '<table style="width:100%;font-size:0.72em;border-collapse:collapse;margin:8px 0">';
+    mappingHtml += '<tr style="color:#8b949e"><th style="text-align:left;padding:4px 8px;border-bottom:1px solid #21262d">Excel表头</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid #21262d">→ 字段Key</th></tr>';
+    headers.forEach((h, i) => {
+        const key = colKeys[i];
+        const isKnown = key !== h;
+        mappingHtml += '<tr><td style="padding:3px 8px;border-bottom:1px solid #21262d;color:#c9d1d9">' + escHtml(h) + '</td>' +
+            '<td style="padding:3px 8px;border-bottom:1px solid #21262d;color:' + (isKnown ? '#3fb950' : '#d2991d') + '">' + escHtml(key) + (isKnown ? '' : ' <span style="font-size:0.85em">(新)</span>') + '</td></tr>';
+    });
+    mappingHtml += '</table>';
+
+    // 数据预览（前3行）
+    let previewHtml = '<div style="max-height:160px;overflow-y:auto;font-size:0.7em;line-height:1.4;color:#7ee787;background:#0d1117;padding:8px;border-radius:4px;margin-top:8px;font-family:monospace">';
+    data.slice(0, 3).forEach((row, i) => {
+        const parts = [];
+        headers.forEach(h => { const key = colKeys[headers.indexOf(h)]; if (row[key] !== '' && row[key] != null) parts.push(h + '=' + row[key]); });
+        previewHtml += '<div style="margin:2px 0">#' + (i+1) + ' ' + escHtml(parts.join(' | ').substring(0, 200)) + '</div>';
+    });
+    if (data.length > 3) previewHtml += '<div style="color:#484f58">… 共 ' + data.length + ' 条数据</div>';
+    previewHtml += '</div>';
+
+    // 弹窗
+    const html = '<h3>📥 导入Excel疑点数据</h3>' +
+        '<div style="color:#d2a8ff;margin-bottom:8px">目标模型: <b>' + escHtml(modelName) + '</b></div>' +
+        '<div style="color:#c9d1d9;margin-bottom:4px">📋 检测到 <b>' + headers.length + '</b> 个字段，<b>' + data.length + '</b> 条疑点数据</div>' +
+        '<div style="color:#d2991d;font-size:0.75em;margin-bottom:4px">⚠️ 导入后将自动同步模型字段配置</div>' +
+        '<div style="margin:10px 0"><b style="font-size:0.82em;color:#8b949e">字段映射：</b>' + mappingHtml + '</div>' +
+        '<div><b style="font-size:0.82em;color:#8b949e">数据预览：</b>' + previewHtml + '</div>' +
+        '<div class="btn-row">' +
+        '<button class="btn-normal" onclick="closeImportModal()">取消</button>' +
+        '<button class="btn-normal" onclick="doImportExcel(\'append\')">追加到现有</button>' +
+        '<button class="btn-accent" onclick="doImportExcel(\'replace\')">替换现有数据</button>' +
+        '</div>';
+
+    let overlay = document.getElementById('importModal');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'importModal';
+        overlay.className = 'modal-overlay';
+        document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = '<div class="modal" style="width:680px;max-width:95vw;max-height:90vh;overflow-y:auto">' + html + '</div>';
+    overlay.style.display = 'flex';
+    overlay._importHeaders = headers;
+    overlay._importColKeys = colKeys;
+    overlay._importData = data;
+    overlay.onclick = function(e) { if (e.target === overlay) closeImportModal(); };
+}
+
+function closeImportModal() {
+    const overlay = document.getElementById('importModal');
+    if (overlay) { overlay.style.display = 'none'; overlay._importData = null; }
+}
+
+function doImportExcel(mode) {
+    const overlay = document.getElementById('importModal');
+    if (!overlay || !overlay._importData) return;
+    const headers = overlay._importHeaders;
+    const data = overlay._importData;
+
+    if (mode === 'replace') {
+        findingsMap[selectedModelId] = data;
+    } else {
+        findingsMap[selectedModelId] = (findingsMap[selectedModelId] || []).concat(data);
+    }
+
+    // ★ 同步模型字段配置
+    const m = models.find(x => x.id === selectedModelId);
+    if (m) {
+        m.fields = headers.join(',');
+    }
+
+    saveData();
+    closeImportModal();
+    renderContent();
+    renderModelList();
+    showToast('✅ 已导入 ' + data.length + ' 条疑点，字段配置已同步 (' + headers.length + '个字段)');
+}
+
+// 批量清空当前模型疑点
+function batchClearFindings() {
+    const findings = findingsMap[selectedModelId] || [];
+    if (!findings.length) { showToast('无疑点可清空'); return; }
+    if (!confirm('⚠️ 确定清空当前模型下全部 ' + findings.length + ' 条疑点数据？\n\n此操作不可恢复！')) return;
+    findingsMap[selectedModelId] = [];
+    saveData();
+    renderContent();
+    renderModelList();
+    showToast('已清空全部疑点');
 }
 
 // ===================================================================
