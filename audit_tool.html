@@ -86,6 +86,9 @@ body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;height:100vh;di
 /* Finding markers */
 .finding-marker .dot{width:10px;height:10px;border-radius:50%;background:#ff7b72;border:2px solid #fff;box-shadow:0 0 6px rgba(255,123,114,0.6)}
 .finding-marker.active .dot{background:#7c3aed;box-shadow:0 0 10px rgba(124,58,237,0.8);width:14px;height:14px}
+/* 缩小到省市级别时隐藏户名标签 */
+.finding-marker .fm-label{transition:opacity 0.2s}
+.finding-marker.hide-labels .fm-label{display:none}
 
 /* Toast */
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;padding:10px 24px;border-radius:8px;font-size:0.85em;z-index:99999;opacity:0;transition:opacity 0.3s;pointer-events:none}
@@ -442,7 +445,20 @@ map.on('mousemove', function(e) {
     document.getElementById('mapStatus').textContent =
         (activeYear==='current'?'当前':activeYear) + ' | ' + wgs.lng.toFixed(6)+', '+wgs.lat.toFixed(6)+' (WGS-84) | z'+map.getZoom();
 });
-map.on('zoomend', ()=>{ document.getElementById('zoomLabel').textContent=map.getZoom(); updateMapStatus(); });
+map.on('zoomend', ()=>{
+    document.getElementById('zoomLabel').textContent=map.getZoom();
+    updateMapStatus();
+    toggleMarkerLabels();
+});
+// 户名标签可见性：zoom>=16(约1公里范围)显示户名，否则隐藏只留坐标点
+function toggleMarkerLabels(){
+    const z=map.getZoom();
+    const show=z>=16;
+    findingMarkers.forEach(m=>{
+        const el=m.getElement();
+        if(el){el.classList.toggle('hide-labels',!show);}
+    });
+}
 function updateMapStatus() {
     document.getElementById('mapStatus').textContent =
         (activeYear==='current'?'当前':activeYear)+' | '+currentWgs.lng.toFixed(6)+', '+currentWgs.lat.toFixed(6)+' (WGS-84) | z'+map.getZoom()+
@@ -574,7 +590,7 @@ function locateAllFindings() {
         const ll = toMap(f.lng,f.lat); bounds.push(ll);
         const icon = L.divIcon({
             className: 'finding-marker'+(i===selectedFindingIdx?' active':''),
-            html: '<div class="dot"></div><span style="color:#ff7b72;font-size:0.65em;margin-left:2px;white-space:nowrap;text-shadow:0 0 4px #000">'+(f.name||f.id)+'</span>',
+            html: '<div class="dot"></div><span class="fm-label" style="color:#ff7b72;font-size:0.65em;margin-left:2px;white-space:nowrap;text-shadow:0 0 4px #000">'+(f.name||f.id)+'</span>',
             iconSize:[120,20], iconAnchor:[5,10]
         });
         const m = L.marker(ll,{icon:icon}).addTo(map);
@@ -586,6 +602,7 @@ function locateAllFindings() {
         findingMarkers.push(m);
     });
     if(bounds.length) map.fitBounds(bounds,{padding:[50,50],maxZoom:16});
+    toggleMarkerLabels();
     updateFindingMarkerHighlight();
     showToast('已标记 '+currentFindings.length+' 个疑点位置');
 }
