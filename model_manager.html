@@ -62,6 +62,12 @@ body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;color:#c9d1d9;h
 
 /* Findings table */
 .table-wrap{overflow-x:auto;margin-top:8px}
+.table-wrap th.sticky-chk,.table-wrap td.sticky-chk{position:sticky;left:0;z-index:2;min-width:28px}
+.table-wrap th.sticky-num,.table-wrap td.sticky-num{position:sticky;left:28px;z-index:2;min-width:30px}
+.table-wrap th.sticky-chk,.table-wrap th.sticky-num{z-index:3;background:#1c2128}
+.table-wrap td.sticky-chk,.table-wrap td.sticky-num{background:#0d1117}
+tr.selected td.sticky-chk,tr.selected td.sticky-num{background:#1a1630}
+tr:hover td.sticky-chk,tr:hover td.sticky-num{background:#161b22}
 table{width:100%;border-collapse:collapse;font-size:0.78em}
 th{text-align:left;padding:8px 10px;background:#1c2128;color:#8b949e;font-weight:normal;border-bottom:2px solid #30363d;white-space:nowrap}
 td{padding:6px 10px;border-bottom:1px solid #21262d;vertical-align:middle}
@@ -372,8 +378,8 @@ function renderContent() {
             const pageFindings = findings.slice(startIdx, endIdx);
 
             html += '<div class="table-wrap"><table><thead><tr>';
-            html += '<th style="width:28px"><input type="checkbox" id="selectAllCb" onclick="toggleSelectAll()" style="cursor:pointer;accent-color:#7c3aed" ' + (pageFindings.every((f, pi) => _selectedRows.has(startIdx + pi)) ? 'checked' : '') + '></th>';
-            html += '<th style="width:30px">#</th>';
+            html += '<th class="sticky-chk"><input type="checkbox" id="selectAllCb" onclick="toggleSelectAll()" style="cursor:pointer;accent-color:#7c3aed" ' + (pageFindings.every((f, pi) => _selectedRows.has(startIdx + pi)) ? 'checked' : '') + '></th>';
+            html += '<th class="sticky-num">#</th>';
             const cols = buildColumns(findings);
             const mForLabel = models.find(x => x.id === selectedModelId);
             cols.forEach(col => { html += '<th>' + escHtml(colLabel(col, mForLabel)) + '</th>'; });
@@ -385,8 +391,8 @@ function renderContent() {
                 const i = startIdx + pi; // 原始索引
                 const checked = _selectedRows.has(i);
                 html += '<tr id="findingRow-' + i + '" class="' + (editingFindingIdx === i ? 'selected' : '') + (checked ? 'selected' : '') + '">';
-                html += '<td><input type="checkbox" ' + (checked ? 'checked' : '') + ' onclick="toggleRow(' + i + ')" style="cursor:pointer;accent-color:#7c3aed"></td>';
-                html += '<td style="color:#484f58">' + (i + 1) + '</td>';
+                html += '<td class="sticky-chk"><input type="checkbox" ' + (checked ? 'checked' : '') + ' onclick="toggleRow(' + i + ')" style="cursor:pointer;accent-color:#7c3aed"></td>';
+                html += '<td class="sticky-num" style="color:#484f58">' + (i + 1) + '</td>';
                 cols.forEach(col => {
                     const val = f[col] != null ? f[col] : '';
                     html += '<td><input class="cell-input' + (typeof val === 'number' ? ' num' : '') + '" value="' + escHtml(String(val)) + '" onchange="onFindingCellChange(' + i + ',\'' + col + '\',this.value)" data-col="' + col + '" data-row="' + i + '"></td>';
