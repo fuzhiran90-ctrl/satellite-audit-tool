@@ -360,6 +360,10 @@ function renderContent() {
                     html += '<td><input class="cell-input' + (typeof val === 'number' ? ' num' : '') + '" value="' + escHtml(String(val)) + '" onchange="onFindingCellChange(' + i + ',\'' + col + '\',this.value)" data-col="' + col + '" data-row="' + i + '"></td>';
                 });
                 html += '<td class="actions-cell">';
+                // 附件指示器
+                const attCount = (Array.isArray(f.attachments) ? f.attachments.length : 0);
+                const attIcon = attCount > 0 ? '<span title="' + attCount + '个附件" style="cursor:pointer;margin-right:4px" onclick="editFindingRow(' + i + ')">📎' + attCount + '</span>' : '';
+                html += attIcon;
                 html += '<button onclick="editFindingRow(' + i + ')" title="编辑整行">✏️</button>';
                 html += '<button class="danger" onclick="deleteFinding(' + i + ')" title="删除">🗑</button>';
                 html += '</td></tr>';
@@ -421,8 +425,8 @@ function buildColumns(findings) {
         });
     }
 
-    // lng/lat 始终移到最后
-    const finalCols = orderedKeys.filter(k => k !== 'lng' && k !== 'lat');
+    // lng/lat 始终移到最后，attachments 不参与表格展示
+    const finalCols = orderedKeys.filter(k => k !== 'lng' && k !== 'lat' && k !== 'attachments');
     if (orderedKeys.includes('lng')) finalCols.push('lng');
     if (orderedKeys.includes('lat')) finalCols.push('lat');
 
@@ -586,6 +590,8 @@ function deleteFinding(idx) {
 }
 
 let editFindingModal = null;
+let _tempAttachments = []; // 编辑过程中的附件（base64数据，不上传到服务器）
+
 function editFindingRow(idx) {
     const findings = findingsMap[selectedModelId] || [];
     if (idx < 0 || idx >= findings.length) return;
@@ -593,21 +599,40 @@ function editFindingRow(idx) {
     editingFindingIdx = idx;
     const cols = buildColumns(findings);
     const mForLabel = models.find(x => x.id === selectedModelId);
+    // 深拷贝现有附件到临时数组
+    _tempAttachments = Array.isArray(f.attachments) ? JSON.parse(JSON.stringify(f.attachments)) : [];
 
-    // Build edit form — 只展示 fields 配置的字段
+    // Build edit form
     let formHtml = '<h3>✏️ 编辑疑点 #' + (idx + 1) + '</h3>';
+
+    // 字段区域
     cols.forEach(k => {
         const val = f[k] != null ? f[k] : '';
         formHtml += '<div class="form-group"><label>' + escHtml(colLabel(k, mForLabel)) + '</label>';
         formHtml += '<input id="modalField_' + k + '" value="' + escHtml(String(val)) + '" data-key="' + k + '">';
         formHtml += '</div>';
     });
+
+    // ★ 附件区域
+    formHtml += '<div class="form-group" style="border:1px solid #30363d;border-radius:8px;padding:12px;margin-top:12px;background:#0d1117">';
+    formHtml += '<label style="color:#d2a8ff;font-size:0.9em;margin-bottom:8px">📎 附件 (' + _tempAttachments.length + '个)</label>';
+    formHtml += '<div id="attachmentList" style="margin-bottom:8px">';
+    formHtml += renderAttachmentList();
+    formHtml += '</div>';
+    formHtml += '<div style="display:flex;gap:6px;align-items:center">';
+    formHtml += '<input type="file" id="attachmentFileInput" accept="image/*,.pdf" multiple style="display:none" onchange="handleAttachmentUpload(this,' + idx + ')">';
+    formHtml += '<button type="button" class="btn-normal" onclick="document.getElementById(\'attachmentFileInput\').click()" style="flex:1">📤 上传文件</button>';
+    formHtml += '<span style="font-size:0.7em;color:#484f58">图片/PDF, 单文件≤2MB</span>';
+    formHtml += '</div>';
+    formHtml += '<div id="attachmentError" style="color:#ff7b72;font-size:0.72em;margin-top:4px;display:none"></div>';
+    formHtml += '</div>';
+
     formHtml += '<div class="btn-row">';
     formHtml += '<button class="btn-normal" onclick="closeEditModal()">取消</button>';
     formHtml += '<button class="btn-accent" onclick="saveEditModal(' + idx + ')">保存</button>';
     formHtml += '</div>';
 
-    // Show modal
+    // Show modal (wider for attachments)
     let overlay = document.getElementById('editModal');
     if (!overlay) {
         overlay = document.createElement('div');
@@ -615,11 +640,85 @@ function editFindingRow(idx) {
         overlay.className = 'modal-overlay';
         document.body.appendChild(overlay);
     }
-    overlay.innerHTML = '<div class="modal">' + formHtml + '</div>';
+    overlay.innerHTML = '<div class="modal" style="width:580px;max-width:95vw">' + formHtml + '</div>';
     overlay.style.display = 'flex';
     editFindingModal = overlay;
-    // Close on overlay click
     overlay.onclick = function(e) { if (e.target === overlay) closeEditModal(); };
+}
+
+// 渲染附件列表（缩略图/文件名）
+function renderAttachmentList() {
+    if (!_tempAttachments.length) return '<div style="color:#484f58;font-size:0.75em;text-align:center;padding:8px">暂无附件</div>';
+    return _tempAttachments.map((a, i) => {
+        const sizeStr = a.size ? (a.size > 1024*1024 ? (a.size/(1024*1024)).toFixed(1)+'MB' : (a.size/1024).toFixed(1)+'KB') : '';
+        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin:3px 0;background:#161b22;border-radius:4px;border:1px solid #21262d">' +
+            (a.type && a.type.startsWith('image/')
+                ? '<img src="' + a.data + '" style="width:36px;height:36px;object-fit:cover;border-radius:3px;border:1px solid #30363d">'
+                : '<span style="font-size:1.4em">📄</span>') +
+            '<div style="flex:1;min-width:0">' +
+                '<div style="font-size:0.75em;color:#c9d1d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + escHtml(a.name) + '">' + escHtml(a.name) + '</div>' +
+                (sizeStr ? '<div style="font-size:0.68em;color:#484f58">' + sizeStr + '</div>' : '') +
+            '</div>' +
+            '<button class="btn-normal" style="font-size:0.65em;padding:2px 6px;color:#ff7b72" onclick="removeAttachment(' + i + ')">✕</button>' +
+        '</div>';
+    }).join('');
+}
+
+// 处理文件上传 → base64
+function handleAttachmentUpload(input, idx) {
+    const errDiv = document.getElementById('attachmentError');
+    errDiv.style.display = 'none';
+    const files = Array.from(input.files);
+    if (!files.length) return;
+
+    let totalSize = _tempAttachments.reduce((s, a) => s + (a.size || 0), 0);
+    const MAX_TOTAL = 8 * 1024 * 1024; // 8MB total
+
+    files.forEach(file => {
+        if (file.size > 2 * 1024 * 1024) {
+            errDiv.textContent = '⚠️ "' + file.name + '" 超过2MB限制，已跳过';
+            errDiv.style.display = 'block';
+            return;
+        }
+        if (totalSize + file.size > MAX_TOTAL) {
+            errDiv.textContent = '⚠️ 附件总大小超过8MB，部分文件已跳过';
+            errDiv.style.display = 'block';
+            return;
+        }
+        totalSize += file.size;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            _tempAttachments.push({
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                data: e.target.result,
+                addedAt: new Date().toISOString()
+            });
+            // 刷新列表
+            const listEl = document.getElementById('attachmentList');
+            if (listEl) listEl.innerHTML = renderAttachmentList();
+        };
+        reader.readAsDataURL(file);
+    });
+    input.value = '';
+}
+
+// 删除附件
+function removeAttachment(i) {
+    _tempAttachments.splice(i, 1);
+    const listEl = document.getElementById('attachmentList');
+    if (listEl) listEl.innerHTML = renderAttachmentList();
+}
+
+// 清理：关闭弹窗时释放base64内存
+function closeEditModal() {
+    if (editFindingModal) {
+        editFindingModal.style.display = 'none';
+        editFindingModal = null;
+    }
+    editingFindingIdx = -1;
+    _tempAttachments = [];
 }
 
 function closeEditModal() {
@@ -646,12 +745,16 @@ function saveEditModal(idx) {
     });
     // 确保配置列都存在（即使用户没改）
     cols.forEach(k => { if (!(k in saved)) saved[k] = f[k] != null ? f[k] : ''; });
+    // 保存附件
+    if (_tempAttachments.length > 0) saved.attachments = JSON.parse(JSON.stringify(_tempAttachments));
+    else delete saved.attachments; // 无附件时清理字段
     findings[idx] = saved;
+    _tempAttachments = [];
     saveData();
     closeEditModal();
     renderContent();
     renderModelList();
-    showToast('疑点「' + (saved.name || saved.id) + '」已更新');
+    showToast('疑点「' + (saved.name || saved.id) + '」已更新' + (saved.attachments ? '（含' + saved.attachments.length + '个附件）' : ''));
 }
 
 // ===================================================================
