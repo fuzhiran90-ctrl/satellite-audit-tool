@@ -378,8 +378,7 @@ function switchTab(tab) {
 }
 
 // ===================================================================
-// ===================================================================
-//  Column inference from findings — 严格按照模型 fields 配置的顺序
+//  Column inference from findings — 严格按照模型 fields 配置，多余字段不展示
 // ===================================================================
 function buildColumns(findings) {
     const m = models.find(x => x.id === selectedModelId);
@@ -403,7 +402,7 @@ function buildColumns(findings) {
         '坐标':'lat','位置坐标':'addr'
     };
 
-    // ★ 核心：按模型 fields 配置的顺序生成列
+    // ★ 严格按模型 fields 配置的顺序生成列
     if (m && m.fields) {
         const fieldNames = m.fields.split(',').map(s => s.trim()).filter(Boolean);
         fieldNames.forEach(fn => {
@@ -422,16 +421,8 @@ function buildColumns(findings) {
         });
     }
 
-    // 附加：数据中存在但 fields 未配置的额外字段（排在配置字段之后）
-    findings.forEach(f => {
-        Object.keys(f).forEach(k => {
-            if (!seen.has(k)) { seen.add(k); orderedKeys.push(k); }
-        });
-    });
-
-    // lng/lat 始终移到最后（坐标字段不适合作为主要展示列）
+    // lng/lat 始终移到最后
     const finalCols = orderedKeys.filter(k => k !== 'lng' && k !== 'lat');
-    // 如果数据中有坐标字段，追加到末尾
     if (orderedKeys.includes('lng')) finalCols.push('lng');
     if (orderedKeys.includes('lat')) finalCols.push('lat');
 
@@ -551,28 +542,35 @@ function onFindingCellChange(rowIdx, col, value) {
 function addFinding() {
     const findings = findingsMap[selectedModelId] || [];
     const m = models.find(x => x.id === selectedModelId);
-    const newId = 'F' + String(findings.length + 1).padStart(3, '0');
-    const newFinding = {
-        id: newId,
-        name: '新疑点' + (findings.length + 1),
-        addr: '请填写地址',
-        lng: 120.55 + (Math.random() - 0.5) * 0.2,
-        lat: 31.90 + (Math.random() - 0.5) * 0.1
-    };
-    // Add extra fields based on model fields config
-    if (m && m.fields) {
-        const fieldNames = m.fields.split(',').map(s => s.trim()).filter(Boolean);
-        if (fieldNames.some(f => f.includes('容量') || f.includes('kW'))) newFinding.capacity = 0;
-        if (fieldNames.some(f => f.includes('时间') || f.includes('日期'))) newFinding.gridDate = '2024-01-01';
-        if (fieldNames.some(f => f.includes('小时') || f.includes('发电'))) newFinding.monthlyHours = 0;
-        if (fieldNames.some(f => f.includes('面积'))) newFinding.area = 0;
-    }
+    // 只用 fields 配置的列创建新疑点
+    const cols = buildColumns(findings.length ? findings : [{id:'_',name:''}]);
+    const newFinding = {};
+    cols.forEach(k => { newFinding[k] = defaultFieldValue(k, findings); });
     findings.push(newFinding);
     findingsMap[selectedModelId] = findings;
     saveData();
     renderContent();
     renderModelList();
-    showToast('疑点「' + newId + '」已添加');
+    showToast('疑点「' + (newFinding.id || 'F' + findings.length) + '」已添加');
+}
+
+// 字段默认值
+function defaultFieldValue(key, findings) {
+    switch (key) {
+        case 'id': return 'F' + String(findings.length + 1).padStart(3, '0');
+        case 'name': return '新疑点' + (findings.length + 1);
+        case 'addr': return '请填写地址';
+        case 'lng': return 120.55 + (Math.random() - 0.5) * 0.2;
+        case 'lat': return 31.90 + (Math.random() - 0.5) * 0.1;
+        case 'capacity': return 0;
+        case 'gridDate': return '2024-01-01';
+        case 'monthlyHours': return 0;
+        case 'area': return 0;
+        case 'detectDate': return '2024-01-01';
+        case 'changeYear': return '2024';
+        default: return '';
+    }
+}
 }
 
 function deleteFinding(idx) {
@@ -593,12 +591,14 @@ function editFindingRow(idx) {
     if (idx < 0 || idx >= findings.length) return;
     const f = findings[idx];
     editingFindingIdx = idx;
+    const cols = buildColumns(findings);
+    const mForLabel = models.find(x => x.id === selectedModelId);
 
-    // Build edit form
+    // Build edit form — 只展示 fields 配置的字段
     let formHtml = '<h3>✏️ 编辑疑点 #' + (idx + 1) + '</h3>';
-    Object.keys(f).forEach(k => {
+    cols.forEach(k => {
         const val = f[k] != null ? f[k] : '';
-        formHtml += '<div class="form-group"><label>' + k + '</label>';
+        formHtml += '<div class="form-group"><label>' + escHtml(colLabel(k, mForLabel)) + '</label>';
         formHtml += '<input id="modalField_' + k + '" value="' + escHtml(String(val)) + '" data-key="' + k + '">';
         formHtml += '</div>';
     });
@@ -634,18 +634,24 @@ function saveEditModal(idx) {
     const findings = findingsMap[selectedModelId] || [];
     if (idx < 0 || idx >= findings.length) return;
     const f = findings[idx];
+    const cols = buildColumns(findings);
+    // 只保存配置字段，清理多余字段
+    const saved = {};
     const inputs = document.querySelectorAll('#editModal input[data-key]');
     inputs.forEach(inp => {
         const key = inp.getAttribute('data-key');
         const val = inp.value;
         const numVal = parseFloat(val);
-        f[key] = isNaN(numVal) ? val : numVal;
+        saved[key] = isNaN(numVal) ? val : numVal;
     });
+    // 确保配置列都存在（即使用户没改）
+    cols.forEach(k => { if (!(k in saved)) saved[k] = f[k] != null ? f[k] : ''; });
+    findings[idx] = saved;
     saveData();
     closeEditModal();
     renderContent();
     renderModelList();
-    showToast('疑点「' + (f.name || f.id) + '」已更新');
+    showToast('疑点「' + (saved.name || saved.id) + '」已更新');
 }
 
 // ===================================================================
