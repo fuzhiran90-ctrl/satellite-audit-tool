@@ -101,9 +101,13 @@ body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;height:100vh;di
 
 <!-- Token -->
 <div class="token-bar">
-    <span>🔑 Token:</span>
-    <input id="tokenInput" type="text" placeholder="输入星图云 API Token（可选，不影响核心功能）">
-    <button id="tokenBtn" onclick="saveToken()">保存</button>
+    <span>🗺️ 高德Key:</span>
+    <input id="amapKeyInput" type="text" placeholder="免费申请→高德开放平台 5000次/天" style="max-width:260px">
+    <span>百度Key:</span>
+    <input id="baiduKeyInput" type="text" placeholder="可选" style="max-width:200px">
+    <span>星图云:</span>
+    <input id="tokenInput" type="text" placeholder="可选" style="max-width:180px">
+    <button id="tokenBtn" onclick="saveAllKeys()">保存全部</button>
     <span id="tokenStatus" style="font-size:0.8em;color:#8b949e">未设置</span>
     <span style="flex:1"></span>
     <span style="color:#8b949e;font-size:0.75em">历史年份:</span>
@@ -125,8 +129,8 @@ body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;height:100vh;di
     <span class="sep"></span>
     <button class="btn-normal" onclick="window.open('model_manager.html','_blank')" style="background:#1f3a5f;border-color:#58a6ff;color:#58a6ff" title="管理审计模型和疑点数据">⚙️ 模型管理</button>
     <span class="sep"></span>
-    <input id="searchInput" type="text" placeholder="搜地址/企业/坐标" onkeydown="if(event.key==='Enter')doSearch()">
-    <button onclick="doSearch()">🔍</button>
+    <input id="searchInput" type="text" placeholder="搜地址定位（免费）如：徐州市沛县安国镇汉王路210-6号" onkeydown="if(event.key==='Enter')doSearch()">
+    <button onclick="doSearch()" title="地址→坐标（免费，无需Token）">🔍</button>
     <button onclick="startDrawRect()" id="drawBtn">▢ 框选</button>
     <span class="sep"></span>
     <button class="warn" onclick="queryHistory()" id="historyBtn">🕐 历史影像</button>
@@ -350,13 +354,14 @@ function _tLon(x,y){let r=300+x+2*y+0.1*x*x+0.1*x*y+0.1*Math.sqrt(Math.abs(x));r
 function wgs2gcj(lng,lat){const dLat=_tLat(lng-105,lat-35),dLon=_tLon(lng-105,lat-35);const r=lat/180*PI;const m=1-EE*Math.sin(r)*Math.sin(r);const s=Math.sqrt(m);return{lng:lng+(dLon*180)/(AX/s*Math.cos(r)*PI),lat:lat+(dLat*180)/((AX*(1-EE))/(m*s)*PI)}}
 function gcj2wgs(lng,lat){let w={lng,lat};for(let i=0;i<5;i++){const t=wgs2gcj(w.lng,w.lat);w.lng+=lng-t.lng;w.lat+=lat-t.lat}return w}
 function gcj2bd(lng,lat){const z=Math.sqrt(lng*lng+lat*lat)+0.00002*Math.sin(lat*PI*3000/180);const th=Math.atan2(lat,lng)+0.000003*Math.cos(lng*PI*3000/180);return{lng:z*Math.cos(th)+0.0065,lat:z*Math.sin(th)+0.006}}
+function bd2gcj(lng,lat){const x=lng-0.0065,y=lat-0.006;const z=Math.sqrt(x*x+y*y)-0.00002*Math.sin(y*PI*3000/180);const th=Math.atan2(y,x)-0.000003*Math.cos(x*PI*3000/180);return{lng:z*Math.cos(th),lat:z*Math.sin(th)}}
 function toMap(lng,lat){const gcj=wgs2gcj(lng,lat);return[gcj.lat,gcj.lng]}
 function fromMap(lat,lng){return gcj2wgs(lng,lat)}
 
 // ===================================================================
 //  四、全局状态
 // ===================================================================
-let TOKEN = '';
+let TOKEN = '', AMAP_KEY = '', BAIDU_KEY = '';
 let currentWgs = { lng: 120.548925, lat: 31.975079 };
 let activeYear = 'current';
 let historyData = {}, historyLayer = null;
@@ -801,15 +806,41 @@ function copyPrompt() {
 }
 
 // ===================================================================
-//  十三、Token & 星图云API
+//  十三、API Keys & 星图云
 // ===================================================================
-function saveToken() {
-    TOKEN=document.getElementById('tokenInput').value.trim();
-    if(!TOKEN){alert('请输入Token');return;}
-    document.getElementById('tokenBtn').classList.add('ok'); document.getElementById('tokenBtn').textContent='✓ 已保存';
-    document.getElementById('tokenStatus').innerHTML='<span style="color:#3fb950">✓</span> 已设置';
-    if(document.getElementById('basemapSelect').value==='geovis') initGeovisCurrent();
+function loadKeys() {
+    try {
+        TOKEN = localStorage.getItem('audit_geovis_token') || '';
+        AMAP_KEY = localStorage.getItem('audit_amap_key') || '';
+        BAIDU_KEY = localStorage.getItem('audit_baidu_key') || '';
+    } catch(e) { TOKEN = ''; AMAP_KEY = ''; BAIDU_KEY = ''; }
+    if (TOKEN) document.getElementById('tokenInput').value = TOKEN;
+    if (AMAP_KEY) document.getElementById('amapKeyInput').value = AMAP_KEY;
+    if (BAIDU_KEY) document.getElementById('baiduKeyInput').value = BAIDU_KEY;
+    updateKeyStatus();
 }
+function saveAllKeys() {
+    TOKEN = document.getElementById('tokenInput').value.trim();
+    AMAP_KEY = document.getElementById('amapKeyInput').value.trim();
+    BAIDU_KEY = document.getElementById('baiduKeyInput').value.trim();
+    try { localStorage.setItem('audit_geovis_token', TOKEN); } catch(e) {}
+    try { localStorage.setItem('audit_amap_key', AMAP_KEY); } catch(e) {}
+    try { localStorage.setItem('audit_baidu_key', BAIDU_KEY); } catch(e) {}
+    document.getElementById('tokenBtn').classList.add('ok'); document.getElementById('tokenBtn').textContent = '✓ 已保存';
+    updateKeyStatus();
+    if (document.getElementById('basemapSelect').value === 'geovis') initGeovisCurrent();
+    showToast('API Keys 已保存');
+}
+function updateKeyStatus() {
+    const parts = [];
+    if (AMAP_KEY) parts.push('🗺️高德');
+    if (BAIDU_KEY) parts.push('🔍百度');
+    if (TOKEN) parts.push('🛰️星图云');
+    document.getElementById('tokenStatus').innerHTML = parts.length
+        ? '<span style="color:#3fb950">✓</span> ' + parts.join(' + ')
+        : '未设置';
+}
+function saveToken() { saveAllKeys(); } // 兼容旧调用
 async function queryHistory() {
     if(!TOKEN){alert('请先输入Token');return;}
     if(!drawnItems.getLayers().length){alert('请先用 ▢ 框选 工具框选核查区域');return;}
@@ -839,63 +870,294 @@ function switchActiveYear() {
 
 // ===================================================================
 //  十四、地理编码搜索
+//  高德优先：地理编码(geocode) + 输入提示(inputtips) 双路并行
+//  自动提取省市区作为city参数缩小搜索范围
+//  渐进式降级：完整地址 → 镇级 → 县级
 // ===================================================================
 let _searchCache=[];
+
+function bd2wgs(lng, lat) { const gcj = bd2gcj(lng, lat); return gcj2wgs(gcj.lng, gcj.lat); }
+
+// 从地址中提取可能的行政区划名称（用作city参数缩小搜索范围）
+function extractCityHint(q) {
+    // 匹配 "XX省XX市XX县/区/镇/乡/街道"
+    const patterns = [
+        /([一-龥]{2,10}(?:市|县|区|旗))[一-龥]{2,10}(?:镇|乡|街道|路|街)/,  // XX市/县 + 后面紧跟镇/路
+        /([一-龥]{2,10}(?:市|县|区|旗))/,   // 最后的市/县/区
+        /([一-龥]{2,6}(?:镇|乡|街道))/       // 镇/乡/街道
+    ];
+    for (const p of patterns) {
+        const m = q.match(p);
+        if (m && m[1] && m[1].length >= 2) return m[1];
+    }
+    return '';
+}
+
+// 渐进式地址简化 — 生成从精确到模糊的搜索变体
+function progressiveQueries(q) {
+    const results = [q];
+    // 去末尾门牌号 (如 "210-6号", "210号", "10幢")
+    let s = q.replace(/[\d\-—–]+号?$/g, '').replace(/[\d]+幢$/g, '').replace(/[，,]\s*$/, '').trim();
+    if (s && s !== q && s.length > 5) results.push(s);
+    // 再去掉 "XX路/街/巷" 之后的数字后缀
+    s = s.replace(/([路街巷道弄])\d.*$/, '$1').trim();
+    if (s && !results.includes(s) && s.length > 5) results.push(s);
+    // 去掉路名本身，只保留行政区划
+    s = s.replace(/[路街巷道弄]\S*$/, '').replace(/[路街巷道弄]$/, '').trim();
+    if (s && !results.includes(s) && s.length > 4) results.push(s);
+    // 只留到镇/乡/街道
+    const m = q.match(/(.+[镇乡街道])/);
+    if (m && m[1] && !results.includes(m[1]) && m[1].length > 3) results.push(m[1]);
+    // 只留到县/区/市
+    const m2 = q.match(/(.+[市县区旗])/);
+    if (m2 && m2[1] && !results.includes(m2[1]) && m2[1].length > 3) results.push(m2[1]);
+    return results;
+}
+
 async function doSearch() {
-    const q=document.getElementById('searchInput').value.trim(); if(!q)return;
-    if(!TOKEN){alert('搜索功能需要星图云Token（定位和框选功能不受影响）');return;}
-    const rd=document.getElementById('searchResults'); rd.style.display='block'; rd.innerHTML='<div class="empty">搜索中...</div>';
-    try{
+    const q = document.getElementById('searchInput').value.trim(); if (!q) return;
+    const rd = document.getElementById('searchResults');
+    rd.style.display = 'block'; rd.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center">🔍 搜索中...</div>';
+    try {
         // 坐标检测
-        const cm=q.match(/^[\s]*(\d{2,3}\.\d+)[,\s]+(\d{2,3}\.\d+)[\s]*$/);
-        if(cm){currentWgs={lng:parseFloat(cm[1]),lat:parseFloat(cm[2])};updateMarker();updatePosDisplay();rd.innerHTML='<div class="empty">已定位</div>';setTimeout(()=>rd.style.display='none',2000);return;}
-        // Geocode + POI 并行搜索
-        const tasks=[];
-        const geocode=async(kw,region)=>{
-            let url='https://api.open.geovisearth.com/pj/geo/v2/geocode/geo?keyword='+encodeURIComponent(kw)+'&pageSize=10&token='+TOKEN;
-            if(region) url+='&region='+encodeURIComponent(region);
-            const r=await fetch(url),d=await r.json();
-            if(d.code===0&&Array.isArray(d.data)) return d.data.map(x=>{const l=(x.location||'').split(',');return{name:x.street||x.formattedAddress||'未知',addr:x.formattedAddress||'',lng:parseFloat(l[0])||0,lat:parseFloat(l[1])||0};}).filter(x=>x.lng&&x.lat);
-            return[];
-        };
-        const poi=async(kw,region)=>{
-            let url='https://api.open.geovisearth.com/pj/geo/v2/assistant/suggestion?keyword='+encodeURIComponent(kw)+'&pageSize=10&token='+TOKEN;
-            if(region==='苏州市') url+='&code=320500'; else if(region==='江苏省') url+='&code=320000';
-            const r=await fetch(url),d=await r.json();
-            if(d.code===0&&Array.isArray(d.data)) return d.data.map(x=>{const l=(x.location||'').split(',');return{name:x.name||'',addr:x.address||x.district||'',lng:parseFloat(l[0])||0,lat:parseFloat(l[1])||0,source:'POI'};}).filter(x=>x.lng&&x.lat);
-            return[];
-        };
-        tasks.push(geocode(q,'苏州市'),geocode(q,''),poi(q,'苏州市'),poi(q,''));
-        const batches=await Promise.all(tasks);
-        const seen=new Map(),all=[];
-        batches.flat().forEach(r=>{const k=r.lng.toFixed(3)+','+r.lat.toFixed(3);if(!seen.has(k)){seen.set(k,true);all.push(r);}});
-        all.sort((a,b)=>{
-            let sa=0,sb=0;
-            if((a.addr||'').includes('张家港市'))sa+=100;else if((a.addr||'').includes('苏州市'))sa+=60;
-            if((b.addr||'').includes('张家港市'))sb+=100;else if((b.addr||'').includes('苏州市'))sb+=60;
-            if(a.name&&a.name.includes(q))sa+=50; if(b.name&&b.name.includes(q))sb+=50;
-            return sb-sa;
+        const cm = q.match(/^[\s]*(\d{2,3}\.\d+)[,\s]+(\d{2,3}\.\d+)[\s]*$/);
+        if (cm) {
+            currentWgs = { lng: parseFloat(cm[1]), lat: parseFloat(cm[2]) };
+            updateMarker(); updatePosDisplay();
+            rd.innerHTML = '<div style="padding:12px;color:#3fb950;text-align:center">✅ 已定位</div>';
+            setTimeout(() => rd.style.display = 'none', 2000); return;
+        }
+
+        const cityHint = extractCityHint(q);
+        const queries = progressiveQueries(q);
+        const usedServices = [];
+        const allResults = [];
+        const seen = new Set();
+
+        // 搜索策略：对每个地址变体并行搜索，用city参数缩小范围
+        for (const query of queries) {
+            const tasks = [];
+
+            if (AMAP_KEY) {
+                if (!usedServices.includes('🗺️高德')) usedServices.push('🗺️高德');
+
+                // A. 高德地理编码 — 带city参数
+                tasks.push((async () => {
+                    let url = 'https://restapi.amap.com/v3/geocode/geo?key=' + AMAP_KEY +
+                        '&address=' + encodeURIComponent(query) + '&output=JSON';
+                    if (cityHint) url += '&city=' + encodeURIComponent(cityHint);
+                    const r = await fetch(url), d = await r.json();
+                    if (d.status === '1' && d.geocodes && d.geocodes.length) {
+                        return d.geocodes.map(x => {
+                            const parts = (x.location || '').split(',');
+                            const gcjLng = parseFloat(parts[0]) || 0, gcjLat = parseFloat(parts[1]) || 0;
+                            const wgs = gcj2wgs(gcjLng, gcjLat);
+                            return {
+                                name: x.formatted_address ? x.formatted_address.split(/[,，]/)[0] : '高德结果',
+                                addr: x.formatted_address || query,
+                                lng: wgs.lng, lat: wgs.lat, source: '高德',
+                                query: query, level: x.level || ''
+                            };
+                        }).filter(x => x.lng && x.lat);
+                    }
+                    return [];
+                })());
+
+                // B. 高德输入提示API — 专为地址补全设计，对模糊匹配更友好
+                tasks.push((async () => {
+                    let url = 'https://restapi.amap.com/v3/assistant/inputtips?key=' + AMAP_KEY +
+                        '&keywords=' + encodeURIComponent(query) + '&output=JSON';
+                    if (cityHint) url += '&city=' + encodeURIComponent(cityHint);
+                    const r = await fetch(url), d = await r.json();
+                    if (d.status === '1' && d.tips && d.tips.length) {
+                        return d.tips.filter(t => t.location && t.location.length > 0).map(t => {
+                            const parts = (t.location || '').split(',');
+                            const gcjLng = parseFloat(parts[0]) || 0, gcjLat = parseFloat(parts[1]) || 0;
+                            const wgs = gcj2wgs(gcjLng, gcjLat);
+                            const name = t.name || '';
+                            const district = t.district || '';
+                            const addr = t.address || '';
+                            const fullAddr = [addr, district, name].filter(Boolean).join('') || query;
+                            return {
+                                name: name || fullAddr,
+                                addr: fullAddr,
+                                lng: wgs.lng, lat: wgs.lat, source: '高德提示',
+                                query: query, level: ''
+                            };
+                        }).filter(x => x.lng && x.lat);
+                    }
+                    return [];
+                })());
+            }
+
+            if (BAIDU_KEY) {
+                if (!usedServices.includes('🔍百度')) usedServices.push('🔍百度');
+                tasks.push((async () => {
+                    const url = 'https://api.map.baidu.com/geocoding/v3/?address=' +
+                        encodeURIComponent(query) + '&output=json&ak=' + BAIDU_KEY +
+                        (cityHint ? '&city=' + encodeURIComponent(cityHint) : '');
+                    const r = await fetch(url), d = await r.json();
+                    if (d.status === 0 && d.result && d.result.location) {
+                        const loc = d.result.location;
+                        const wgs = bd2wgs(loc.lng, loc.lat);
+                        return [{
+                            name: d.result.name || d.result.formatted_address || '百度结果',
+                            addr: d.result.formatted_address || query,
+                            lng: wgs.lng, lat: wgs.lat, source: '百度',
+                            query: query, level: d.result.level || ''
+                        }];
+                    }
+                    return [];
+                })());
+            }
+
+            // OSM 兜底
+            if (!AMAP_KEY && !BAIDU_KEY) {
+                if (!usedServices.includes('🌐OSM')) usedServices.push('🌐OSM');
+            }
+            tasks.push((async () => {
+                const url = 'https://nominatim.openstreetmap.org/search?q=' +
+                    encodeURIComponent(query) + '&format=json&limit=10&accept-language=zh';
+                const r = await fetch(url);
+                if (!r.ok) return [];
+                const d = await r.json();
+                return d.map(x => ({
+                    name: x.display_name.split(',')[0] || '未知',
+                    addr: x.display_name || '',
+                    lng: parseFloat(x.lon) || 0, lat: parseFloat(x.lat) || 0,
+                    source: 'OSM', query: query
+                })).filter(x => x.lng && x.lat);
+            })());
+
+            const batches = await Promise.all(tasks);
+            for (const r of batches.flat()) {
+                const k = r.lng.toFixed(4) + ',' + r.lat.toFixed(4);
+                if (!seen.has(k)) { seen.add(k); allResults.push(r); }
+            }
+
+            // 找到 ≥5 个精确结果就停止降级
+            if (allResults.length >= 5) break;
+        }
+
+        _searchCache = allResults;
+
+        // 智能排序：level越精细分越高 + 高德提示优先
+        const levelRank = { '门牌号': 10, 'POI': 9, '村庄': 8, '道路': 7, '乡镇': 5, '区县': 3, '城市': 1 };
+        const sourceRank = { '高德提示': 4, '高德': 3, '百度': 2, 'OSM': 1, '星图云': 2, '星图云POI': 2 };
+        _searchCache.sort((a, b) => {
+            const sa = (sourceRank[a.source] || 0) * 10 + (levelRank[a.level] || 0);
+            const sb = (sourceRank[b.source] || 0) * 10 + (levelRank[b.level] || 0);
+            return sb - sa;
         });
-        _searchCache=all;
-        if(!all.length) rd.innerHTML='<div class="empty">未找到结果<br><small>简化关键词或直接输入坐标 (如 120.5489, 31.9751)</small></div>';
-        else rd.innerHTML=all.map((r,i)=>'<div class="item" onclick="selectResult('+i+')"><div class="name">'+r.name+'</div><div>'+(r.addr||'')+'</div><div style="color:#484f58;font-size:0.8em">'+r.lng.toFixed(6)+', '+r.lat.toFixed(6)+'</div></div>').join('');
-    }catch(e){rd.innerHTML='<div class="empty">网络错误: '+e.message+'</div>';}
+
+        const svcTag = usedServices.length ? ' | 来源: ' + usedServices.join(' + ') : '';
+        if (cityHint) document.getElementById('searchStatus').textContent = '搜索范围: ' + cityHint;
+
+        if (!_searchCache.length) {
+            rd.innerHTML = '<div style="padding:14px;color:#8b949e;text-align:center">❌ 未找到结果' + svcTag +
+                '<br><small style="color:#484f58;line-height:1.8">已尝试：' + queries.map((x,i) => (i===0?'完整地址':'→ 降级') + '「' + x + '」').join('<br>') +
+                (cityHint ? '<br>限定范围: ' + cityHint : '') +
+                '<br><br>💡 尝试简化搜索词，如只搜"安国镇"</small></div>';
+        } else {
+            const icons = { '高德': '🗺️', '高德提示': '💡', '百度': '🔍', 'OSM': '🌐', '星图云': '🛰️', '星图云POI': '🛰️' };
+            // 颜色标记精度
+            function levelColor(level) {
+                if (!level) return '#484f58';
+                if (/门牌号|POI|村庄/.test(level)) return '#3fb950';
+                if (/道路|乡镇/.test(level)) return '#d2991d';
+                return '#8b949e';
+            }
+            rd.innerHTML = _searchCache.map((r, i) =>
+                '<div class="item" onclick="selectResult(' + i + ')" style="display:flex;align-items:center;gap:8px">' +
+                '<span style="font-size:1.2em">' + (icons[r.source] || '📍') + '</span>' +
+                '<div style="flex:1;min-width:0">' +
+                '<div style="color:#58a6ff;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(r.name) + '</div>' +
+                '<div style="font-size:0.8em;color:#8b949e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(r.addr || '') + '</div>' +
+                '<div style="font-size:0.72em">' +
+                '<span style="color:#484f58">' + r.lng.toFixed(6) + ', ' + r.lat.toFixed(6) + '</span>' +
+                '<span style="color:' + levelColor(r.level) + ';margin-left:6px">' + (r.level || r.source) + '</span>' +
+                (r.query !== q ? '<span style="color:#d2991d;margin-left:4px">模糊</span>' : '') +
+                '</div></div></div>'
+            ).join('');
+            document.getElementById('searchStatus').textContent = '找到 ' + _searchCache.length + ' 个结果' + svcTag;
+        }
+    } catch (e) {
+        rd.innerHTML = '<div style="padding:12px;color:#ff7b72;text-align:center">网络错误: ' + escHtml(e.message) + '</div>';
+    }
 }
-function selectResult(i){const r=_searchCache[i];if(!r)return;currentWgs={lng:r.lng,lat:r.lat};updateMarker();updatePosDisplay();document.getElementById('searchResults').style.display='none';document.getElementById('searchInput').value=r.name+' — '+(r.addr||'');}
-async function reverseGeocode(){
-    if(!TOKEN){alert('请先设置Token');return;}
-    const kw=currentWgs.lng.toFixed(6)+','+currentWgs.lat.toFixed(6);
-    try{
-        let r=await fetch('https://api.open.geovisearth.com/pj/geo/v2/assistant/suggestion?keyword='+encodeURIComponent(kw)+'&pageSize=5&token='+TOKEN);
-        let d=await r.json();
-        if(d.code===0&&Array.isArray(d.data)&&d.data.length){alert('附近POI:\n'+d.data.map(x=>x.name+'\n  '+(x.address||x.district||'')).filter(Boolean).join('\n'));return;}
-        r=await fetch('https://api.open.geovisearth.com/pj/geo/v2/geocode/geo?keyword='+encodeURIComponent(kw)+'&pageSize=5&token='+TOKEN);
-        d=await r.json();
-        if(d.code===0&&Array.isArray(d.data)&&d.data.length) alert('逆地理编码:\n'+d.data.map(x=>x.formattedAddress||x.street||'').filter(Boolean).join('\n'));
-        else alert('该坐标无地址信息');
-    }catch(e){alert('失败: '+e.message);}
+
+function selectResult(i) {
+    const r = _searchCache[i]; if (!r) return;
+    currentWgs = { lng: r.lng, lat: r.lat };
+    updateMarker(); updatePosDisplay();
+    document.getElementById('searchResults').style.display = 'none';
+    document.getElementById('searchInput').value = r.name + ' — ' + (r.addr || '');
+    showToast('已定位: ' + r.name + ' [' + r.source + ']');
 }
-document.addEventListener('click',e=>{if(!e.target.closest('#searchResults')&&!e.target.closest('.search-bar')) document.getElementById('searchResults').style.display='none';});
+
+async function reverseGeocode() {
+    const lat = currentWgs.lat, lng = currentWgs.lng;
+    const results = [];
+
+    // 1. 高德逆地理编码（GCJ-02坐标）
+    if (AMAP_KEY) {
+        try {
+            const gcj = wgs2gcj(lng, lat);
+            const url = 'https://restapi.amap.com/v3/geocode/regeo?key=' + AMAP_KEY +
+                '&location=' + gcj.lng.toFixed(6) + ',' + gcj.lat.toFixed(6) + '&output=JSON&radius=100&extensions=all';
+            const r = await fetch(url), d = await r.json();
+            if (d.status === '1' && d.regeocode) {
+                const f = d.regeocode.formatted_address || '';
+                results.push('🗺️ 高德: ' + f);
+                // 附近POI
+                if (d.regeocode.pois && d.regeocode.pois.length) {
+                    results.push('  附近: ' + d.regeocode.pois.slice(0, 5).map(p => p.name).join('、'));
+                }
+            }
+        } catch (e) { }
+    }
+
+    // 2. 百度逆地理编码（BD-09坐标）
+    if (BAIDU_KEY) {
+        try {
+            const gcj = wgs2gcj(lng, lat);
+            const bd = gcj2bd(gcj.lng, gcj.lat);
+            const url = 'https://api.map.baidu.com/reverse_geocoding/v3/?ak=' + BAIDU_KEY +
+                '&location=' + bd.lat.toFixed(6) + ',' + bd.lng.toFixed(6) + '&output=json';
+            const r = await fetch(url), d = await r.json();
+            if (d.status === 0 && d.result) {
+                results.push('🔍 百度: ' + (d.result.formatted_address || d.result.address || ''));
+            }
+        } catch (e) { }
+    }
+
+    // 3. Nominatim 免费兜底
+    if (!AMAP_KEY && !BAIDU_KEY) {
+        try {
+            const r = await fetch('https://nominatim.openstreetmap.org/reverse?lat=' + lat +
+                '&lon=' + lng + '&format=json&accept-language=zh');
+            const d = await r.json();
+            if (d && d.display_name) results.push('🌐 OSM: ' + d.display_name);
+        } catch (e) { }
+    }
+
+    if (results.length) {
+        alert('📍 坐标→地址 (' + lng.toFixed(6) + ', ' + lat.toFixed(6) + ' WGS-84):\n\n' + results.join('\n'));
+    } else {
+        alert('无地址信息\n\n提示：设置高德Key（免费）可获取详细中文地址。\n申请地址: https://lbs.amap.com/');
+    }
+}
+
+// escHtml for search results
+function escHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+document.addEventListener('click', e => {
+    if (!e.target.closest('#searchResults') && !e.target.closest('.search-bar'))
+        document.getElementById('searchResults').style.display = 'none';
+});
 
 // ===================================================================
 //  十五、工具函数
@@ -912,6 +1174,7 @@ async function captureMap(){try{const c=await html2canvas(document.getElementByI
 // ===================================================================
 //  十六、初始化
 // ===================================================================
+loadKeys();
 initAuditModelSelect();
 updatePosDisplay(); updateMapStatus();
 circle100m = L.circle(toMap(currentWgs.lng,currentWgs.lat),{radius:100,color:'#ff8800',weight:2,fill:false,dashArray:'8,4',opacity:0.7}).addTo(map);
