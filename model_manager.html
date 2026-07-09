@@ -211,6 +211,7 @@ let activeTab = 'model'; // 'model' | 'findings'
 let currentPage = 0;      // 疑点清单当前分页
 const PAGE_SIZE = 100;    // 每页显示条数
 let _saveTimer = null;    // 防抖保存定时器
+let _selectedRows = new Set(); // 勾选中的行索引
 
 // ===================================================================
 //  Init
@@ -353,9 +354,8 @@ function renderContent() {
         html += '<button class="btn-normal" onclick="importFindingsJSON()">📤 导入JSON</button>';
         html += '<button class="btn-normal" onclick="exportFindingsJSON()">📥 导出JSON</button>';
         if (findings.length > 0) {
-            html += '<button class="btn-normal" onclick="batchGeocode()">📍 地址→坐标(全部)</button>';
-            html += '<button class="btn-normal" onclick="testGeocodeOne()">🧪 测试1条</button>';
-            html += '<button class="btn-normal" onclick="testGeocodeBatch(10)">🧪 测试10条</button>';
+            const selCount = _selectedRows.size;
+            html += '<button class="btn-accent" onclick="geocodeSelected()" ' + (selCount === 0 ? 'disabled' : '') + '>📍 测试勾选(' + selCount + '条)</button>';
             html += '<button class="btn-danger" onclick="batchClearFindings()">🗑 批量清空</button>';
         }
         html += '</div></div>';
@@ -372,6 +372,7 @@ function renderContent() {
             const pageFindings = findings.slice(startIdx, endIdx);
 
             html += '<div class="table-wrap"><table><thead><tr>';
+            html += '<th style="width:28px"><input type="checkbox" id="selectAllCb" onclick="toggleSelectAll()" style="cursor:pointer;accent-color:#7c3aed" ' + (pageFindings.every((f, pi) => _selectedRows.has(startIdx + pi)) ? 'checked' : '') + '></th>';
             html += '<th style="width:30px">#</th>';
             const cols = buildColumns(findings);
             const mForLabel = models.find(x => x.id === selectedModelId);
@@ -382,7 +383,9 @@ function renderContent() {
             for (let pi = 0; pi < pageFindings.length; pi++) {
                 const f = pageFindings[pi];
                 const i = startIdx + pi; // 原始索引
-                html += '<tr id="findingRow-' + i + '" class="' + (editingFindingIdx === i ? 'selected' : '') + '">';
+                const checked = _selectedRows.has(i);
+                html += '<tr id="findingRow-' + i + '" class="' + (editingFindingIdx === i ? 'selected' : '') + (checked ? 'selected' : '') + '">';
+                html += '<td><input type="checkbox" ' + (checked ? 'checked' : '') + ' onclick="toggleRow(' + i + ')" style="cursor:pointer;accent-color:#7c3aed"></td>';
                 html += '<td style="color:#484f58">' + (i + 1) + '</td>';
                 cols.forEach(col => {
                     const val = f[col] != null ? f[col] : '';
@@ -614,9 +617,126 @@ function goPage(pg) {
     currentPage = pg;
     editingFindingIdx = -1;
     renderContent();
-    // 滚动到表格顶部
     const tbl = document.querySelector('.table-wrap');
     if (tbl) tbl.scrollIntoView({ behavior: 'smooth' });
+}
+
+// 单行勾选/取消
+function toggleRow(i) {
+    if (_selectedRows.has(i)) _selectedRows.delete(i);
+    else _selectedRows.add(i);
+    renderContent(); // 刷新按钮计数和全选状态
+}
+
+// 全选/取消本页
+function toggleSelectAll() {
+    const findings = findingsMap[selectedModelId] || [];
+    const startIdx = currentPage * PAGE_SIZE;
+    const endIdx = Math.min(startIdx + PAGE_SIZE, findings.length);
+    const allChecked = Array.from({ length: endIdx - startIdx }, (_, pi) => startIdx + pi).every(i => _selectedRows.has(i));
+    if (allChecked) {
+        for (let i = startIdx; i < endIdx; i++) _selectedRows.delete(i);
+    } else {
+        for (let i = startIdx; i < endIdx; i++) _selectedRows.add(i);
+    }
+    renderContent();
+}
+
+// 统一测试按钮：对勾选中的条目执行地理编码
+async function geocodeSelected() {
+    if (_selectedRows.size === 0) { showToast('请先勾选需要测试的条目'); return; }
+    const findings = findingsMap[selectedModelId] || [];
+    const amapKey = localStorage.getItem('audit_amap_key') || '';
+    if (!amapKey) { showToast('请先在主工具页面顶部配置高德Key并保存', true); return; }
+
+    // 收集勾选的无坐标疑点
+    const batch = [];
+    for (const idx of _selectedRows) {
+        if (idx < 0 || idx >= findings.length) continue;
+        const f = findings[idx];
+        const addr = f.addr || f['发电地址'] || f['地址'] || f['位置'] || '';
+        const hasCoord = (f.lng != null && f.lat != null && f.lng !== 0 && f.lat !== 0 && f.lng !== '' && f.lat !== '');
+        if (addr && String(addr).trim().length > 3 && !hasCoord) {
+            batch.push({ idx, addr: String(addr).trim() });
+        }
+    }
+
+    if (!batch.length) { showToast('勾选条目均已含坐标，无需处理'); return; }
+    if (!confirm('将对 ' + batch.length + ' 条勾选疑点进行地址→坐标转换。\n\n不限速，预计 ' + Math.ceil(batch.length / 8) + ' 秒。\n\n确定开始？')) return;
+
+    showGeocodeProgress(batch.length);
+    const startT = performance.now();
+    const timings = [];
+    let succ = 0, fail = 0;
+
+    for (let j = 0; j < batch.length; j++) {
+        const t0 = performance.now();
+        const item = batch[j];
+        let ok = false;
+        try {
+            const city = extractCity(item.addr);
+            let url = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+                '&address=' + encodeURIComponent(item.addr) + '&output=JSON';
+            if (city) url += '&city=' + encodeURIComponent(city);
+            const r = await fetch(url), d = await r.json();
+            if ((d.status === '1' || d.status === 1) && d.geocodes && d.geocodes.length) {
+                setCoord(findings, item.idx, d.geocodes[0].location);
+                ok = true; succ++;
+            } else {
+                const fallbacks = buildFallbackAddrs(item.addr);
+                for (const fb of fallbacks) {
+                    const c2 = extractCity(fb);
+                    let u2 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+                        '&address=' + encodeURIComponent(fb) + '&output=JSON';
+                    if (c2) u2 += '&city=' + encodeURIComponent(c2);
+                    const r2 = await fetch(u2), d2 = await r2.json();
+                    if ((d2.status === '1' || d2.status === 1) && d2.geocodes && d2.geocodes.length) {
+                        setCoord(findings, item.idx, d2.geocodes[0].location);
+                        ok = true; succ++;
+                        break;
+                    }
+                }
+                if (!ok) fail++;
+            }
+        } catch(e) { fail++; }
+
+        const ms = Math.round((performance.now() - t0) * 10) / 10;
+        timings.push({ addr: item.addr.substring(0, 30), ok, ms });
+        updateGeocodeProgress(j + 1, batch.length, succ, fail);
+    }
+
+    const totalMs = Math.round(performance.now() - startT);
+    syncLngLatFields();
+    saveData();
+    currentPage = Math.floor(batch[0].idx / PAGE_SIZE);
+    renderContent();
+    renderModelList();
+
+    // 弹窗报告
+    const quickest = Math.min(...timings.map(t => t.ms));
+    const slowest = Math.max(...timings.map(t => t.ms));
+    const avgMs = Math.round(timings.reduce((s, t) => s + t.ms, 0) / timings.length * 10) / 10;
+    let log = '⏱ 勾选测试报告\n';
+    log += '━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    log += '耗时: ' + totalMs + 'ms (' + (totalMs/1000).toFixed(1) + 's) | 平均: ' + avgMs + 'ms | ' +
+        '最快: ' + quickest + 'ms | 最慢: ' + slowest + 'ms\n';
+    log += '速率: ' + Math.round(batch.length / (totalMs / 1000)) + '条/秒\n';
+    log += '成功: ' + succ + ' | 失败: ' + fail + '\n';
+    log += '━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+    timings.forEach((t, i) => {
+        const f = findings[batch[i].idx];
+        log += (i + 1).toString().padStart(batch.length > 100 ? 3 : 2) + '. [' + (t.ok ? '✅' : '❌') + ' ' + t.ms + 'ms] ' + t.addr + '\n';
+        if (t.ok && f.lng) log += '    → lng=' + f.lng.toFixed(6) + ' lat=' + f.lat.toFixed(6) + '\n';
+    });
+
+    const overlay = document.getElementById('geocodeModal');
+    if (overlay) {
+        overlay.innerHTML = '<div class="modal" style="width:640px;max-width:95vw;text-align:left">' +
+            '<h3 style="color:#3fb950">✅ 勾选测试完成 — 坐标已写入</h3>' +
+            '<pre style="background:#0d1117;color:#7ee787;border:1px solid #30363d;border-radius:6px;padding:12px;margin:12px 0;font-size:0.72em;line-height:1.6;white-space:pre-wrap;max-height:350px;overflow-y:auto;font-family:monospace">' + escHtml(log) + '</pre>' +
+            '<button class="btn-accent" onclick="closeGeocodeModal()" style="width:100%">关闭查看表格</button>' +
+            '</div>';
+    }
 }
 
 function addFinding() {
