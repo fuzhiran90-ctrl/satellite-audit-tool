@@ -589,7 +589,6 @@ function deleteFinding(idx) {
 }
 
 let editFindingModal = null;
-let _tempAttachments = []; // 编辑过程中的附件（base64数据，不上传到服务器）
 
 function editFindingRow(idx) {
     const findings = findingsMap[selectedModelId] || [];
@@ -598,8 +597,18 @@ function editFindingRow(idx) {
     editingFindingIdx = idx;
     const cols = buildColumns(findings);
     const mForLabel = models.find(x => x.id === selectedModelId);
-    // 深拷贝现有附件到临时数组
-    _tempAttachments = Array.isArray(f.attachments) ? JSON.parse(JSON.stringify(f.attachments)) : [];
+
+    // 先创建弹窗壳子
+    let overlay = document.getElementById('editModal');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'editModal';
+        overlay.className = 'modal-overlay';
+        document.body.appendChild(overlay);
+    }
+    editFindingModal = overlay;
+    // 附件统一挂在弹窗元素上，代替全局变量
+    editFindingModal._attachments = Array.isArray(f.attachments) ? JSON.parse(JSON.stringify(f.attachments)) : [];
 
     // Build edit form
     let formHtml = '<h3>✏️ 编辑疑点 #' + (idx + 1) + '</h3>';
@@ -613,13 +622,14 @@ function editFindingRow(idx) {
     });
 
     // ★ 附件区域
+    const atts = editFindingModal._attachments;
     formHtml += '<div class="form-group" style="border:1px solid #30363d;border-radius:8px;padding:12px;margin-top:12px;background:#0d1117">';
-    formHtml += '<label style="color:#d2a8ff;font-size:0.9em;margin-bottom:8px">📎 附件 (' + _tempAttachments.length + '个)</label>';
+    formHtml += '<label style="color:#d2a8ff;font-size:0.9em;margin-bottom:8px">📎 附件 (' + atts.length + '个)</label>';
     formHtml += '<div id="attachmentList" style="margin-bottom:8px">';
-    formHtml += renderAttachmentList();
+    formHtml += renderAttachmentList(atts);
     formHtml += '</div>';
     formHtml += '<div style="display:flex;gap:6px;align-items:center">';
-    formHtml += '<input type="file" id="attachmentFileInput" accept="image/*,.pdf" multiple style="display:none" onchange="handleAttachmentUpload(this,' + idx + ')">';
+    formHtml += '<input type="file" id="attachmentFileInput" accept="image/*,.pdf" multiple style="display:none" onchange="handleAttachmentUpload(this)">';
     formHtml += '<button type="button" class="btn-normal" onclick="document.getElementById(\'attachmentFileInput\').click()" style="flex:1">📤 上传文件</button>';
     formHtml += '<span style="font-size:0.7em;color:#484f58">图片/PDF, 单文件≤2MB</span>';
     formHtml += '</div>';
@@ -631,24 +641,15 @@ function editFindingRow(idx) {
     formHtml += '<button class="btn-accent" onclick="saveEditModal(' + idx + ')">保存</button>';
     formHtml += '</div>';
 
-    // Show modal (wider for attachments)
-    let overlay = document.getElementById('editModal');
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'editModal';
-        overlay.className = 'modal-overlay';
-        document.body.appendChild(overlay);
-    }
     overlay.innerHTML = '<div class="modal" style="width:580px;max-width:95vw">' + formHtml + '</div>';
     overlay.style.display = 'flex';
-    editFindingModal = overlay;
     overlay.onclick = function(e) { if (e.target === overlay) closeEditModal(); };
 }
 
 // 渲染附件列表（缩略图/文件名）
-function renderAttachmentList() {
-    if (!_tempAttachments.length) return '<div style="color:#484f58;font-size:0.75em;text-align:center;padding:8px">暂无附件</div>';
-    return _tempAttachments.map((a, i) => {
+function renderAttachmentList(atts) {
+    if (!atts || !atts.length) return '<div style="color:#484f58;font-size:0.75em;text-align:center;padding:8px">暂无附件</div>';
+    return atts.map((a, i) => {
         const sizeStr = a.size ? (a.size > 1024*1024 ? (a.size/(1024*1024)).toFixed(1)+'MB' : (a.size/1024).toFixed(1)+'KB') : '';
         return '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin:3px 0;background:#161b22;border-radius:4px;border:1px solid #21262d">' +
             (a.type && a.type.startsWith('image/')
@@ -663,14 +664,16 @@ function renderAttachmentList() {
     }).join('');
 }
 
-// 处理文件上传 → base64
-function handleAttachmentUpload(input, idx) {
+// 处理文件上传 → base64，附件数据存在弹窗元素上
+function handleAttachmentUpload(input) {
+    if (!editFindingModal) return;
+    const atts = editFindingModal._attachments || [];
     const errDiv = document.getElementById('attachmentError');
     errDiv.style.display = 'none';
     const files = Array.from(input.files);
     if (!files.length) return;
 
-    let totalSize = _tempAttachments.reduce((s, a) => s + (a.size || 0), 0);
+    let totalSize = atts.reduce((s, a) => s + (a.size || 0), 0);
     const MAX_TOTAL = 8 * 1024 * 1024; // 8MB total
 
     files.forEach(file => {
@@ -687,16 +690,17 @@ function handleAttachmentUpload(input, idx) {
         totalSize += file.size;
         const reader = new FileReader();
         reader.onload = function(e) {
-            _tempAttachments.push({
+            atts.push({
                 name: file.name,
                 type: file.type,
                 size: file.size,
                 data: e.target.result,
                 addedAt: new Date().toISOString()
             });
+            editFindingModal._attachments = atts;
             // 刷新列表
             const listEl = document.getElementById('attachmentList');
-            if (listEl) listEl.innerHTML = renderAttachmentList();
+            if (listEl) listEl.innerHTML = renderAttachmentList(atts);
         };
         reader.readAsDataURL(file);
     });
@@ -705,19 +709,20 @@ function handleAttachmentUpload(input, idx) {
 
 // 删除附件
 function removeAttachment(i) {
-    _tempAttachments.splice(i, 1);
+    if (!editFindingModal || !editFindingModal._attachments) return;
+    editFindingModal._attachments.splice(i, 1);
     const listEl = document.getElementById('attachmentList');
-    if (listEl) listEl.innerHTML = renderAttachmentList();
+    if (listEl) listEl.innerHTML = renderAttachmentList(editFindingModal._attachments);
 }
 
-// 清理：关闭弹窗时释放base64内存
+// 关闭弹窗时清理
 function closeEditModal() {
     if (editFindingModal) {
         editFindingModal.style.display = 'none';
+        delete editFindingModal._attachments;
         editFindingModal = null;
     }
     editingFindingIdx = -1;
-    _tempAttachments = [];
 }
 
 function closeEditModal() {
@@ -744,11 +749,11 @@ function saveEditModal(idx) {
     });
     // 确保配置列都存在（即使用户没改）
     cols.forEach(k => { if (!(k in saved)) saved[k] = f[k] != null ? f[k] : ''; });
-    // 保存附件
-    if (_tempAttachments.length > 0) saved.attachments = JSON.parse(JSON.stringify(_tempAttachments));
-    else delete saved.attachments; // 无附件时清理字段
+    // 保存附件（从弹窗元素读取）
+    const atts = editFindingModal && editFindingModal._attachments ? editFindingModal._attachments : [];
+    if (atts.length > 0) saved.attachments = JSON.parse(JSON.stringify(atts));
+    else delete saved.attachments;
     findings[idx] = saved;
-    _tempAttachments = [];
     saveData();
     closeEditModal();
     renderContent();
