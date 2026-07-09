@@ -749,8 +749,8 @@ async function geocodeSelected() {
     }
 
     if (!batch.length) { showToast('勾选条目均已含坐标，无需处理'); return; }
-    const estTime = Math.ceil(batch.length / 4); // ~4条/s（含重试时间）
-    if (!confirm('将对 ' + batch.length + ' 条勾选疑点进行地址→坐标转换。\n\n★ 限速~4条/秒 + 失败自动重试\n★ 预计耗时 ' + estTime + ' 秒\n\n确定开始？')) return;
+    const estTime = Math.ceil(batch.length / 8); // ~4条/s（含重试时间）
+    if (!confirm('将对 ' + batch.length + ' 条勾选疑点进行地址→坐标转换。\n\n★ 限速~8条/秒 + 失败自动重试\n★ 预计耗时 ' + estTime + ' 秒\n\n确定开始？')) return;
 
     showGeocodeProgress(batch.length);
     const startT = performance.now();
@@ -773,8 +773,8 @@ async function geocodeSelected() {
         const ms = Math.round((performance.now() - t0) * 10) / 10;
         timings.push({ addr: item.addr.substring(0, 30), ok: result.ok, ms, reason: result.reason });
 
-        // ★ 限速：250ms间隔 = ~4条/秒，高德免费QPS~10，4条完全安全
-        if (j < batch.length - 1) await new Promise(r => setTimeout(r, 250));
+        // ★ 限速：125ms间隔 = ~8条/秒，高德免费QPS~10，8条较安全
+        if (j < batch.length - 1) await new Promise(r => setTimeout(r, 125));
 
         updateGeocodeProgress(j + 1, batch.length, succ, fail);
         if ((j + 1) % 50 === 0) saveData();
@@ -1241,7 +1241,7 @@ async function batchGeocode() {
         return;
     }
 
-    if (!confirm('将为 ' + needGeocode.length + ' 条疑点进行地址→坐标转换。\n\n★ 限速~4条/秒 + 失败自动重试\n★ 预计耗时 ' + Math.ceil(needGeocode.length / 4) + ' 秒\n\n确定开始？')) {
+    if (!confirm('将为 ' + needGeocode.length + ' 条疑点进行地址→坐标转换。\n\n★ 限速~8条/秒 + 失败自动重试\n★ 预计耗时 ' + Math.ceil(needGeocode.length / 8) + ' 秒\n\n确定开始？')) {
         closeGeocodeModal();
         return;
     }
