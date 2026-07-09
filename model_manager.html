@@ -650,6 +650,40 @@ function toggleSelectAll() {
     renderContent();
 }
 
+// 单次地理编码请求（带重试 + 限速标记）
+// 返回 { ok, wgs, level } 或 { ok: false, reason }
+async function requestGeocodeOne(addr, amapKey) {
+    const city = extractCity(addr);
+    let lastError = '';
+
+    // 三条地址变体依次尝试
+    const variants = [addr, ...buildFallbackAddrs(addr)];
+
+    for (const v of variants) {
+        const c = extractCity(v) || city;
+        let url = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+            '&address=' + encodeURIComponent(v) + '&output=JSON';
+        if (c) url += '&city=' + encodeURIComponent(c);
+
+        // 每条变体最多重试2次
+        for (let retry = 0; retry < 2; retry++) {
+            try {
+                if (retry > 0) await new Promise(r => setTimeout(r, 800)); // 重试前等待
+                const r = await fetch(url), d = await r.json();
+                if ((d.status === '1' || d.status === 1) && d.geocodes && d.geocodes.length) {
+                    const wgs = gcj2wgs(
+                        parseFloat(d.geocodes[0].location.split(',')[0]),
+                        parseFloat(d.geocodes[0].location.split(',')[1])
+                    );
+                    return { ok: true, wgs, level: d.geocodes[0].level || '' };
+                }
+                lastError = 'code=' + d.status + ' info=' + (d.info || '无结果');
+            } catch(e) { lastError = '网络错误: ' + e.message; }
+        }
+    }
+    return { ok: false, reason: lastError };
+}
+
 // 统一测试按钮：对勾选中的条目执行地理编码
 async function geocodeSelected() {
     if (_selectedRows.size === 0) { showToast('请先勾选需要测试的条目'); return; }
@@ -670,7 +704,8 @@ async function geocodeSelected() {
     }
 
     if (!batch.length) { showToast('勾选条目均已含坐标，无需处理'); return; }
-    if (!confirm('将对 ' + batch.length + ' 条勾选疑点进行地址→坐标转换。\n\n不限速，预计 ' + Math.ceil(batch.length / 8) + ' 秒。\n\n确定开始？')) return;
+    const estTime = Math.ceil(batch.length / 4); // ~4条/s（含重试时间）
+    if (!confirm('将对 ' + batch.length + ' 条勾选疑点进行地址→坐标转换。\n\n★ 限速~4条/秒 + 失败自动重试\n★ 预计耗时 ' + estTime + ' 秒\n\n确定开始？')) return;
 
     showGeocodeProgress(batch.length);
     const startT = performance.now();
@@ -680,37 +715,24 @@ async function geocodeSelected() {
     for (let j = 0; j < batch.length; j++) {
         const t0 = performance.now();
         const item = batch[j];
-        let ok = false;
-        try {
-            const city = extractCity(item.addr);
-            let url = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
-                '&address=' + encodeURIComponent(item.addr) + '&output=JSON';
-            if (city) url += '&city=' + encodeURIComponent(city);
-            const r = await fetch(url), d = await r.json();
-            if ((d.status === '1' || d.status === 1) && d.geocodes && d.geocodes.length) {
-                setCoord(findings, item.idx, d.geocodes[0].location);
-                ok = true; succ++;
-            } else {
-                const fallbacks = buildFallbackAddrs(item.addr);
-                for (const fb of fallbacks) {
-                    const c2 = extractCity(fb);
-                    let u2 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
-                        '&address=' + encodeURIComponent(fb) + '&output=JSON';
-                    if (c2) u2 += '&city=' + encodeURIComponent(c2);
-                    const r2 = await fetch(u2), d2 = await r2.json();
-                    if ((d2.status === '1' || d2.status === 1) && d2.geocodes && d2.geocodes.length) {
-                        setCoord(findings, item.idx, d2.geocodes[0].location);
-                        ok = true; succ++;
-                        break;
-                    }
-                }
-                if (!ok) fail++;
-            }
-        } catch(e) { fail++; }
+
+        const result = await requestGeocodeOne(item.addr, amapKey);
+        if (result.ok) {
+            findings[item.idx].lng = Math.round(result.wgs.lng * 1000000) / 1000000;
+            findings[item.idx].lat = Math.round(result.wgs.lat * 1000000) / 1000000;
+            succ++;
+        } else {
+            fail++;
+        }
 
         const ms = Math.round((performance.now() - t0) * 10) / 10;
-        timings.push({ addr: item.addr.substring(0, 30), ok, ms });
+        timings.push({ addr: item.addr.substring(0, 30), ok: result.ok, ms, reason: result.reason });
+
+        // ★ 限速：250ms间隔 = ~4条/秒，高德免费QPS~10，4条完全安全
+        if (j < batch.length - 1) await new Promise(r => setTimeout(r, 250));
+
         updateGeocodeProgress(j + 1, batch.length, succ, fail);
+        if ((j + 1) % 50 === 0) saveData();
     }
 
     const totalMs = Math.round(performance.now() - startT);
@@ -724,17 +746,22 @@ async function geocodeSelected() {
     const quickest = Math.min(...timings.map(t => t.ms));
     const slowest = Math.max(...timings.map(t => t.ms));
     const avgMs = Math.round(timings.reduce((s, t) => s + t.ms, 0) / timings.length * 10) / 10;
-    let log = '⏱ 勾选测试报告\n';
+    const failedReasons = timings.filter(t => !t.ok).map(t => t.reason).filter(Boolean);
+    const reasonSummary = failedReasons.length ? [...new Set(failedReasons)].join(', ') : '';
+
+    let log = '⏱ 勾选测试报告 (限速~4条/s)\n';
     log += '━━━━━━━━━━━━━━━━━━━━━━━━━\n';
     log += '耗时: ' + totalMs + 'ms (' + (totalMs/1000).toFixed(1) + 's) | 平均: ' + avgMs + 'ms | ' +
         '最快: ' + quickest + 'ms | 最慢: ' + slowest + 'ms\n';
     log += '速率: ' + Math.round(batch.length / (totalMs / 1000)) + '条/秒\n';
     log += '成功: ' + succ + ' | 失败: ' + fail + '\n';
+    if (reasonSummary) log += '失败原因: ' + reasonSummary + '\n';
     log += '━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
     timings.forEach((t, i) => {
         const f = findings[batch[i].idx];
         log += (i + 1).toString().padStart(batch.length > 100 ? 3 : 2) + '. [' + (t.ok ? '✅' : '❌') + ' ' + t.ms + 'ms] ' + t.addr + '\n';
         if (t.ok && f.lng) log += '    → lng=' + f.lng.toFixed(6) + ' lat=' + f.lat.toFixed(6) + '\n';
+        if (!t.ok && t.reason) log += '    → ' + t.reason + '\n';
     });
 
     const overlay = document.getElementById('geocodeModal');
@@ -1169,58 +1196,33 @@ async function batchGeocode() {
         return;
     }
 
-    if (!confirm('将为 ' + needGeocode.length + ' 条疑点进行地址→坐标转换。\n\n使用高德地理编码（自动限定城市范围），约 8条/秒。\n预计耗时 ' + Math.ceil(needGeocode.length/8) + ' 秒。\n\n确定开始？')) {
+    if (!confirm('将为 ' + needGeocode.length + ' 条疑点进行地址→坐标转换。\n\n★ 限速~4条/秒 + 失败自动重试\n★ 预计耗时 ' + Math.ceil(needGeocode.length / 4) + ' 秒\n\n确定开始？')) {
         closeGeocodeModal();
         return;
     }
 
     _geocodeRunning = true; _geocodeAborted = false;
     let success = 0, fail = 0;
-    const errors = []; // 记录前几个失败原因
+    const errors = [];
 
     for (let j = 0; j < needGeocode.length; j++) {
         if (_geocodeAborted) break;
         const item = needGeocode[j];
-        try {
-            const city = extractCity(item.addr);
-            let url = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
-                '&address=' + encodeURIComponent(item.addr) + '&output=JSON';
-            if (city) url += '&city=' + encodeURIComponent(city);
 
-            const r = await fetch(url), d = await r.json();
-            // 放宽条件：status可能是字符串"1"或数字1
-            if ((d.status === '1' || d.status === 1) && d.geocodes && d.geocodes.length) {
-                const loc = d.geocodes[0].location.split(',');
-                const gcjLng = parseFloat(loc[0]), gcjLat = parseFloat(loc[1]);
-                const wgs = gcj2wgs(gcjLng, gcjLat);
-                findings[item.idx].lng = Math.round(wgs.lng * 1000000) / 1000000;
-                findings[item.idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
-                success++;
-            } else {
-                // 降级1：去掉详细门牌号
-                const shortAddr = item.addr.replace(/[\d\-\—–]+号.*$/g, '').replace(/[\d]+幢.*$/g, '').replace(/[\d]+栋.*$/g, '').replace(/[\d]+单元.*$/g, '').trim();
-                if (shortAddr !== item.addr && shortAddr.length > 3) {
-                    const city2 = extractCity(shortAddr);
-                    let url2 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
-                        '&address=' + encodeURIComponent(shortAddr) + '&output=JSON';
-                    if (city2) url2 += '&city=' + encodeURIComponent(city2);
-                    const r2 = await fetch(url2), d2 = await r2.json();
-                    if ((d2.status === '1' || d2.status === 1) && d2.geocodes && d2.geocodes.length) {
-                        const loc2 = d2.geocodes[0].location.split(',');
-                        const gcjLng2 = parseFloat(loc2[0]), gcjLat2 = parseFloat(loc2[1]);
-                        const wgs2 = gcj2wgs(gcjLng2, gcjLat2);
-                        findings[item.idx].lng = Math.round(wgs2.lng * 1000000) / 1000000;
-                        findings[item.idx].lat = Math.round(wgs2.lat * 1000000) / 1000000;
-                        success++;
-                    } else { fail++; if (errors.length < 5) errors.push(item.addr.substring(0, 40) + '... → ' + (d.info || d2.info || '无结果')); }
-                } else { fail++; if (errors.length < 5) errors.push(item.addr.substring(0, 40) + '... → ' + (d.info || '无结果')); }
-            }
-        } catch(e) { fail++; if (errors.length < 3) errors.push('网络错误: ' + e.message); }
+        const result = await requestGeocodeOne(item.addr, amapKey);
+        if (result.ok) {
+            findings[item.idx].lng = Math.round(result.wgs.lng * 1000000) / 1000000;
+            findings[item.idx].lat = Math.round(result.wgs.lat * 1000000) / 1000000;
+            success++;
+        } else {
+            fail++;
+            if (errors.length < 5) errors.push(item.addr.substring(0, 40) + '... → ' + result.reason);
+        }
+
         updateGeocodeProgress(j + 1, needGeocode.length, success, fail);
-        // 每50条自动保存，防止意外中断丢失进度
         if ((j + 1) % 50 === 0) saveData();
-        // 速率控制：~7条/秒，3000条约7分钟，避免触发限流
-        if (j % 7 === 0 && j > 0) await new Promise(r => setTimeout(r, 1000));
+        // ★ 限速 + 主动释放浏览器线程
+        if (j < needGeocode.length - 1) await new Promise(r => setTimeout(r, 250));
     }
 
     _geocodeRunning = false;
