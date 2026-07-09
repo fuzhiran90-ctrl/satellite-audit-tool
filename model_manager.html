@@ -355,6 +355,7 @@ function renderContent() {
         if (findings.length > 0) {
             html += '<button class="btn-normal" onclick="batchGeocode()">📍 地址→坐标(全部)</button>';
             html += '<button class="btn-normal" onclick="testGeocodeOne()">🧪 测试1条</button>';
+            html += '<button class="btn-normal" onclick="testGeocodeBatch(10)">🧪 测试10条</button>';
             html += '<button class="btn-danger" onclick="batchClearFindings()">🗑 批量清空</button>';
         }
         html += '</div></div>';
@@ -797,6 +798,109 @@ function testGeocodeShowResult(log, success) {
         '<pre style="background:#0d1117;color:#7ee787;border:1px solid #30363d;border-radius:6px;padding:12px;margin:12px 0;font-size:0.75em;line-height:1.7;white-space:pre-wrap;max-height:400px;overflow-y:auto;font-family:monospace">' + escHtml(log) + '</pre>' +
         '<button class="btn-accent" onclick="closeGeocodeModal()" style="width:100%">关闭</button>' +
         '</div>';
+}
+
+// 批量测试 n 条：顺序执行，显示逐条耗时和对性能的影响
+async function testGeocodeBatch(n) {
+    const findings = findingsMap[selectedModelId] || [];
+    if (!findings.length) { showToast('无疑点数据'); return; }
+
+    const amapKey = localStorage.getItem('audit_amap_key') || '';
+    if (!amapKey) { showToast('请先在主工具页面顶部配置高德Key并保存', true); return; }
+
+    // 收集前 n 条无坐标的疑点
+    const batch = [];
+    for (let i = 0; i < findings.length && batch.length < n; i++) {
+        const f = findings[i];
+        const addr = f.addr || f['发电地址'] || f['地址'] || f['位置'] || '';
+        const hasCoord = (f.lng != null && f.lat != null && f.lng !== 0 && f.lat !== 0 && f.lng !== '' && f.lat !== '');
+        if (addr && String(addr).trim().length > 3 && !hasCoord) {
+            batch.push({ idx: i, addr: String(addr).trim() });
+        }
+    }
+
+    if (!batch.length) { showToast('所有疑点已有坐标'); return; }
+    if (!confirm('将对 ' + batch.length + ' 条疑点进行顺序地理编码测试。\n\n实时显示逐条耗时，不限制速率，感受最大性能。\n\n确定开始？')) return;
+
+    showGeocodeProgress(batch.length);
+    const startTime = performance.now();
+    const timings = [];
+    let succ = 0, fail = 0;
+
+    for (let j = 0; j < batch.length; j++) {
+        const t0 = performance.now();
+        const item = batch[j];
+        let ok = false;
+        try {
+            const city = extractCity(item.addr);
+            let url = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+                '&address=' + encodeURIComponent(item.addr) + '&output=JSON';
+            if (city) url += '&city=' + encodeURIComponent(city);
+            const r = await fetch(url), d = await r.json();
+            if ((d.status === '1' || d.status === 1) && d.geocodes && d.geocodes.length) {
+                const loc = d.geocodes[0].location.split(',');
+                const wgs = gcj2wgs(parseFloat(loc[0]), parseFloat(loc[1]));
+                findings[item.idx].lng = Math.round(wgs.lng * 1000000) / 1000000;
+                findings[item.idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
+                ok = true; succ++;
+            } else {
+                // 降级去门牌号
+                const sa = item.addr.replace(/[\d\-\—–]+号.*$/g, '').replace(/[\d]+幢.*$/g, '').trim();
+                if (sa !== item.addr && sa.length > 3) {
+                    const c2 = extractCity(sa);
+                    let u2 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+                        '&address=' + encodeURIComponent(sa) + '&output=JSON';
+                    if (c2) u2 += '&city=' + encodeURIComponent(c2);
+                    const r2 = await fetch(u2), d2 = await r2.json();
+                    if ((d2.status === '1' || d2.status === 1) && d2.geocodes && d2.geocodes.length) {
+                        const wgs2 = gcj2wgs(parseFloat(d2.geocodes[0].location.split(',')[0]), parseFloat(d2.geocodes[0].location.split(',')[1]));
+                        findings[item.idx].lng = Math.round(wgs2.lng * 1000000) / 1000000;
+                        findings[item.idx].lat = Math.round(wgs2.lat * 1000000) / 1000000;
+                        ok = true; succ++;
+                    } else { fail++; }
+                } else { fail++; }
+            }
+        } catch(e) { fail++; }
+
+        const t1 = performance.now();
+        const elapsed = Math.round((t1 - t0) * 10) / 10;
+        timings.push({ addr: item.addr.substring(0, 30), ok, ms: elapsed });
+        updateGeocodeProgress(j + 1, batch.length, succ, fail);
+    }
+
+    const totalMs = Math.round(performance.now() - startTime);
+    syncLngLatFields();
+    saveData();
+    renderContent();
+    renderModelList();
+
+    // 显示详细性能报告
+    const quickest = Math.min(...timings.map(t => t.ms));
+    const slowest = Math.max(...timings.map(t => t.ms));
+    const avgMs = Math.round(timings.reduce((s, t) => s + t.ms, 0) / timings.length * 10) / 10;
+    const reqsPerSec = Math.round(batch.length / (totalMs / 1000));
+
+    let log = '⏱ 性能测试报告\n';
+    log += '━━━━━━━━━━━━━━━━━━━━━━━━━\n';
+    log += '总耗时:   ' + totalMs + 'ms (' + (totalMs/1000).toFixed(1) + 's)\n';
+    log += '平均耗时: ' + avgMs + 'ms/条\n';
+    log += '最快:     ' + quickest + 'ms | 最慢: ' + slowest + 'ms\n';
+    log += '估算速率: ' + reqsPerSec + ' 条/秒\n';
+    log += '内存估算: ' + (findings[0] ? Math.round(JSON.stringify(findings[0]).length / 1024) : '?') + ' KB/条\n';
+    log += '成功: ' + succ + ' | 失败: ' + fail + '\n';
+    log += '━━━━━━━━━━━━━━━━━━━━━━━━━\n\n逐条详情:\n';
+    timings.forEach((t, i) => {
+        log += (i + 1).toString().padStart(2) + '. [' + (t.ok ? '✅' : '❌') + ' ' + t.ms + 'ms] ' + t.addr + '\n';
+    });
+
+    const overlay = document.getElementById('geocodeModal');
+    if (overlay) {
+        overlay.innerHTML = '<div class="modal" style="width:580px;max-width:95vw;text-align:left">' +
+            '<h3 style="color:#3fb950">⏱ 性能测试完成</h3>' +
+            '<pre style="background:#0d1117;color:#7ee787;border:1px solid #30363d;border-radius:6px;padding:12px;margin:12px 0;font-size:0.73em;line-height:1.7;white-space:pre-wrap;max-height:340px;overflow-y:auto;font-family:monospace">' + escHtml(log) + '</pre>' +
+            '<button class="btn-accent" onclick="closeGeocodeModal()" style="width:100%">关闭</button>' +
+            '</div>';
+    }
 }
 
 // 自动同步模型字段：确保经度、纬度字段存在于模型配置末尾
