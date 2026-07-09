@@ -70,7 +70,10 @@ body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;color:#c9d1d9;h
 tr.selected td.sticky-chk,tr.selected td.sticky-num{background:#1a1630}
 tr:hover td.sticky-chk,tr:hover td.sticky-num{background:#161b22}
 table{width:100%;border-collapse:separate;border-spacing:0;font-size:0.78em}
-th{text-align:left;padding:8px 10px;background:#1c2128;color:#8b949e;font-weight:normal;border-bottom:2px solid #30363d;white-space:nowrap;position:sticky;top:84px;z-index:5}
+th{text-align:left;padding:8px 10px;background:#1c2128;color:#8b949e;font-weight:normal;border-bottom:2px solid #30363d;white-space:nowrap}
+/* 表头悬浮克隆条 */
+#stickyHeaderClone{display:none;position:fixed;top:84px;left:296px;right:0;z-index:999;overflow:hidden;background:#1c2128;border-bottom:2px solid #30363d}
+#stickyHeaderClone.show{display:block}
 td{padding:6px 10px;border-bottom:1px solid #21262d;vertical-align:middle}
 tr:hover td{background:#161b22}
 tr.selected td{background:#1a1630}
@@ -378,14 +381,20 @@ function renderContent() {
             const endIdx = Math.min(startIdx + PAGE_SIZE, findings.length);
             const pageFindings = findings.slice(startIdx, endIdx);
 
-            html += '<div class="table-wrap"><table><thead><tr>';
-            html += '<th class="sticky-chk"><input type="checkbox" id="selectAllCb" onclick="toggleSelectAll()" style="cursor:pointer;accent-color:#7c3aed" ' + (pageFindings.every((f, pi) => _selectedRows.has(startIdx + pi)) ? 'checked' : '') + '></th>';
-            html += '<th class="sticky-num">#</th>';
+            // ★ 构建表头HTML（用于真实thead和悬浮克隆）
             const cols = buildColumns(findings);
             const mForLabel = models.find(x => x.id === selectedModelId);
-            cols.forEach(col => { html += '<th>' + escHtml(colLabel(col, mForLabel)) + '</th>'; });
-            html += '<th style="width:80px">操作</th>';
-            html += '</tr></thead><tbody>';
+            let theadHtml = '<tr>';
+            theadHtml += '<th class="sticky-chk"><input type="checkbox" id="selectAllCb" onclick="toggleSelectAll()" style="cursor:pointer;accent-color:#7c3aed" ' + (pageFindings.every((f, pi) => _selectedRows.has(startIdx + pi)) ? 'checked' : '') + '></th>';
+            theadHtml += '<th class="sticky-num">#</th>';
+            cols.forEach(col => { theadHtml += '<th>' + escHtml(colLabel(col, mForLabel)) + '</th>'; });
+            theadHtml += '<th style="width:80px">操作</th>';
+            theadHtml += '</tr>';
+
+            // ★ 悬浮克隆条：sticky放在section-title和table之间，表头滚出视口时显示
+            html += '<div id="stickyHeaderClone" style="position:sticky;top:84px;z-index:100;background:#1c2128;border-bottom:2px solid #30363d;display:none;overflow:hidden"><table style="width:100%;border-collapse:separate;border-spacing:0;font-size:0.78em"><thead>' + theadHtml + '</thead></table></div>';
+
+            html += '<div class="table-wrap"><table><thead>' + theadHtml + '</thead><tbody>';
 
             for (let pi = 0; pi < pageFindings.length; pi++) {
                 const f = pageFindings[pi];
@@ -434,6 +443,7 @@ function renderContent() {
     }
 
     document.getElementById('contentArea').innerHTML = html;
+    if (activeTab === 'findings') setTimeout(setupStickyHeader, 50);
 }
 
 function switchTab(tab) {
@@ -1791,6 +1801,58 @@ document.addEventListener('keydown', function(e) {
         showToast('数据已保存');
     }
 });
+
+// ===================================================================
+//  表头悬浮克隆 — 用JS替代CSS sticky（CSS在table元素上不可靠）
+// ===================================================================
+function setupStickyHeader() {
+    var content = document.getElementById('contentArea');
+    if (!content._stickySetup) {
+        content._stickySetup = true;
+        content.addEventListener('scroll', manageStickyClone);
+        // 水平滚动同步
+        content.addEventListener('scroll', function() {
+            var tw = document.querySelector('.table-wrap');
+            var clone = document.getElementById('stickyHeaderClone');
+            if (tw && clone && clone.style.display !== 'none') {
+                var ct = clone.querySelector('table');
+                if (ct) ct.style.marginLeft = '-' + tw.scrollLeft + 'px';
+            }
+        });
+    }
+    // 每次渲染后也设置水平同步
+    var tw = document.querySelector('.table-wrap');
+    if (tw && !tw._horizBound) {
+        tw._horizBound = true;
+        tw.addEventListener('scroll', function() {
+            var clone = document.getElementById('stickyHeaderClone');
+            if (clone && clone.style.display !== 'none') {
+                var ct = clone.querySelector('table');
+                if (ct) ct.style.marginLeft = '-' + tw.scrollLeft + 'px';
+            }
+        });
+    }
+    // 立即检查一遍
+    manageStickyClone();
+}
+
+function manageStickyClone() {
+    var clone = document.getElementById('stickyHeaderClone');
+    var tw = document.querySelector('.table-wrap');
+    if (!clone || !tw) return;
+    var thead = tw.querySelector('thead');
+    if (!thead) { clone.style.display = 'none'; return; }
+
+    var rect = thead.getBoundingClientRect();
+    // 表头底边滚到吸顶栏下方 → 显示克隆
+    if (rect.bottom < 84) {
+        clone.style.display = 'block';
+        var ct = clone.querySelector('table');
+        if (ct) ct.style.marginLeft = '-' + tw.scrollLeft + 'px';
+    } else {
+        clone.style.display = 'none';
+    }
+}
 
 // ===================================================================
 //  Startup
