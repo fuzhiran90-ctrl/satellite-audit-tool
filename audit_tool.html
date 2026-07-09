@@ -480,11 +480,13 @@ const CITY_BOUNDARIES={"南京市":[[119.0675,32.4624],[118.8986,32.5605],[118.8
 // 一次性绘制遮罩+省界线+地市边界线
 (function drawJiangsuOverlay(){
     const OUTER=[[85,-180],[85,180],[-60,180],[-60,-180],[85,-180]];
-    // 外遮罩（省外半透明黑色，坐标用GCJ-02直塞L.polygon——Leaflet接受[lng,lat]对）
-    L.polygon([OUTER,JS_BOUNDARY],{color:'none',fillColor:'#000',fillOpacity:0.38,interactive:false}).addTo(map);
+    // JS_BOUNDARY 是 GCJ-02 [lng,lat]→转为 Leaflet [lat,lng] 格式，与 OUTER 坐标系一致
+    const jsLatLng = JS_BOUNDARY.map(([lng,lat])=>[lat,lng]);
+    // 省外遮罩（内外环坐标统一后，Leaflet渲染"带洞多边形"）
+    L.polygon([OUTER,jsLatLng],{color:'none',fillColor:'#000',fillOpacity:0.55,interactive:false}).addTo(map);
     // 江苏省金色轮廓线
-    L.polyline(JS_BOUNDARY.map(([lng,lat])=>[lat,lng]),{color:'#d2991d',weight:2.5,opacity:0.7,dashArray:'8,4',interactive:false}).addTo(map);
-    // 13个地市真实边界（细虚线）
+    L.polyline(jsLatLng,{color:'#d2991d',weight:2.5,opacity:0.8,dashArray:'8,4',interactive:false}).addTo(map);
+    // 13个地市真实边界（细虚线，GCJ-02 → Leaflet [lat,lng]）
     const s=document.createElement('style');s.textContent='.city-label{background:rgba(13,17,23,0.75)!important;border:none!important;color:#d2991d!important;font-size:0.68em!important;padding:1px 6px!important;border-radius:3px!important;pointer-events:none}';document.head.appendChild(s);
     for(const [n,pts] of Object.entries(CITY_BOUNDARIES)){
         L.polyline(pts.map(([lng,lat])=>[lat,lng]),{color:'#3fb950',weight:1,opacity:0.35,dashArray:'6,4,2,4',interactive:false}).bindTooltip(n,{permanent:true,direction:'center',className:'city-label'}).addTo(map);
