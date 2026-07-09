@@ -344,7 +344,8 @@ function renderContent() {
         html += '<button class="btn-normal" onclick="importFindingsJSON()">📤 导入JSON</button>';
         html += '<button class="btn-normal" onclick="exportFindingsJSON()">📥 导出JSON</button>';
         if (findings.length > 0) {
-            html += '<button class="btn-normal" onclick="batchGeocode()">📍 地址→坐标</button>';
+            html += '<button class="btn-normal" onclick="batchGeocode()">📍 地址→坐标(全部)</button>';
+            html += '<button class="btn-normal" onclick="testGeocodeOne()">🧪 测试1条</button>';
             html += '<button class="btn-danger" onclick="batchClearFindings()">🗑 批量清空</button>';
         }
         html += '</div></div>';
@@ -627,6 +628,119 @@ function extractCity(addr) {
     const m2 = addr.match(/([一-龥]{2,10})(?:市|县|区|镇|乡|街道)/);
     if (m2) return m2[1];
     return '';
+}
+
+// 测试单条：取第一条无坐标的疑点，手动测试地理编码并显示结果
+async function testGeocodeOne() {
+    const findings = findingsMap[selectedModelId] || [];
+    if (!findings.length) { showToast('无疑点数据'); return; }
+
+    const amapKey = localStorage.getItem('audit_amap_key') || '';
+    if (!amapKey) { showToast('请先在主工具页面顶部配置高德Key并保存', true); return; }
+
+    // 找第一条有地址但无坐标的疑点
+    let testItem = null;
+    for (let i = 0; i < findings.length; i++) {
+        const f = findings[i];
+        const addr = f.addr || f['发电地址'] || f['地址'] || f['位置'] || '';
+        const hasCoord = (f.lng != null && f.lat != null && f.lng !== 0 && f.lat !== 0 && f.lng !== '' && f.lat !== '');
+        if (addr && String(addr).trim().length > 3 && !hasCoord) {
+            testItem = { idx: i, addr: String(addr).trim() };
+            break;
+        }
+    }
+
+    if (!testItem) {
+        showToast('所有疑点已有坐标，无需测试');
+        return;
+    }
+
+    // 显示测试弹窗
+    showGeocodeProgress(1);
+    updateGeocodeProgress(0, 1, 0, 0);
+
+    const city = extractCity(testItem.addr);
+    let log = '';
+    log += '🔍 测试地址: ' + testItem.addr + '\n';
+    log += '🏙️ 提取城市: ' + (city || '(未识别)') + '\n';
+    log += '🔑 Key前缀: ' + amapKey.substring(0, 8) + '...\n\n';
+
+    // 第1次：完整地址 + city
+    let url1 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+        '&address=' + encodeURIComponent(testItem.addr) + '&output=JSON';
+    if (city) url1 += '&city=' + encodeURIComponent(city);
+    log += '📡 请求1: geocode/geo (完整地址 + city=' + (city || '无') + ')\n';
+    try {
+        const r1 = await fetch(url1), d1 = await r1.json();
+        log += '   响应: status=' + d1.status + ' info=' + (d1.info || '') + ' ' +
+            (d1.geocodes ? 'results=' + d1.geocodes.length : '无结果') + '\n';
+        if ((d1.status === '1' || d1.status === 1) && d1.geocodes && d1.geocodes.length) {
+            const loc = d1.geocodes[0].location.split(',');
+            const gcj = { lng: parseFloat(loc[0]), lat: parseFloat(loc[1]) };
+            const wgs = gcj2wgs(gcj.lng, gcj.lat);
+            log += '   ✅ 成功! GCJ-02: ' + gcj.lng.toFixed(6) + ', ' + gcj.lat.toFixed(6) + '\n';
+            log += '   ✅ WGS-84: ' + wgs.lng.toFixed(6) + ', ' + wgs.lat.toFixed(6) + '\n';
+            log += '   地址: ' + (d1.geocodes[0].formatted_address || '') + '\n';
+            log += '   级别: ' + (d1.geocodes[0].level || '') + '\n';
+            updateGeocodeProgress(1, 1, 1, 0);
+            // 询问是否保存到疑点
+            const save = confirm('✅ 测试成功!\n\n' + log + '\n\n是否保存该坐标到疑点？');
+            if (save) {
+                findings[testItem.idx].lng = Math.round(wgs.lng * 1000000) / 1000000;
+                findings[testItem.idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
+                saveData();
+                renderContent();
+                renderModelList();
+            }
+            testGeocodeShowResult(log, true);
+            return;
+        }
+    } catch(e) { log += '   ❌ 网络错误: ' + e.message + '\n'; }
+
+    // 第2次：去门牌号 + city
+    const shortAddr = testItem.addr.replace(/[\d\-\—–]+号.*$/g, '').replace(/[\d]+幢.*$/g, '').replace(/[\d]+栋.*$/g, '').trim();
+    log += '\n📡 请求2: (降级去门牌) ' + shortAddr + '\n';
+    try {
+        const city2 = extractCity(shortAddr);
+        let url2 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+            '&address=' + encodeURIComponent(shortAddr) + '&output=JSON';
+        if (city2) url2 += '&city=' + encodeURIComponent(city2);
+        const r2 = await fetch(url2), d2 = await r2.json();
+        log += '   响应: status=' + d2.status + ' info=' + (d2.info || '') + ' ' +
+            (d2.geocodes ? 'results=' + d2.geocodes.length : '无结果') + '\n';
+        if ((d2.status === '1' || d2.status === 1) && d2.geocodes && d2.geocodes.length) {
+            const loc = d2.geocodes[0].location.split(',');
+            const gcj = { lng: parseFloat(loc[0]), lat: parseFloat(loc[1]) };
+            const wgs = gcj2wgs(gcj.lng, gcj.lat);
+            log += '   ✅ 降级成功! WGS-84: ' + wgs.lng.toFixed(6) + ', ' + wgs.lat.toFixed(6) + '\n';
+            const save = confirm('✅ 降级后成功!\n\n' + log + '\n\n是否保存该坐标到疑点？');
+            if (save) {
+                findings[testItem.idx].lng = Math.round(wgs.lng * 1000000) / 1000000;
+                findings[testItem.idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
+                saveData();
+                renderContent();
+                renderModelList();
+            }
+            testGeocodeShowResult(log, true);
+            return;
+        }
+    } catch(e) { log += '   ❌ 网络错误: ' + e.message + '\n'; }
+
+    log += '\n❌ 两次尝试均失败。请检查:\n';
+    log += '  1. 高德Key是否为"Web服务"类型\n';
+    log += '  2. Key是否已启用\n';
+    log += '  3. 地址是否过于偏僻\n';
+    testGeocodeShowResult(log, false);
+}
+
+function testGeocodeShowResult(log, success) {
+    const overlay = document.getElementById('geocodeModal');
+    if (!overlay) return;
+    overlay.innerHTML = '<div class="modal" style="width:580px;max-width:95vw;text-align:left">' +
+        '<h3 style="color:' + (success ? '#3fb950' : '#ff7b72') + '">' + (success ? '✅' : '❌') + ' 测试结果</h3>' +
+        '<pre style="background:#0d1117;color:#7ee787;border:1px solid #30363d;border-radius:6px;padding:12px;margin:12px 0;font-size:0.75em;line-height:1.7;white-space:pre-wrap;max-height:400px;overflow-y:auto;font-family:monospace">' + escHtml(log) + '</pre>' +
+        '<button class="btn-accent" onclick="closeGeocodeModal()" style="width:100%">关闭</button>' +
+        '</div>';
 }
 
 async function batchGeocode() {
