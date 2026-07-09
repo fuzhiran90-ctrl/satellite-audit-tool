@@ -62,16 +62,16 @@ body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;color:#c9d1d9;h
 
 /* Findings table */
 .table-wrap{overflow-x:auto;margin-top:8px}
-.table-wrap th.sticky-chk,.table-wrap td.sticky-chk{position:sticky;left:0;z-index:2;min-width:28px;background:#1c2128}
+.table-wrap th.sticky-chk,.table-wrap td.sticky-chk{position:sticky;left:0;z-index:2;min-width:28px}
 .table-wrap th.sticky-num,.table-wrap td.sticky-num{position:sticky;left:28px;z-index:2;min-width:30px}
-.table-wrap th.sticky-chk{z-index:4}
-.table-wrap th.sticky-num{z-index:4;background:#1c2128}
+.table-wrap th.sticky-chk{top:84px;z-index:6;background:#1c2128}
+.table-wrap th.sticky-num{top:84px;z-index:6;background:#1c2128}
 .table-wrap td.sticky-chk{background:#0d1117}
 .table-wrap td.sticky-num{background:#0d1117;box-shadow:3px 0 8px rgba(0,0,0,0.5)}
 tr.selected td.sticky-chk,tr.selected td.sticky-num{background:#1a1630}
 tr:hover td.sticky-chk,tr:hover td.sticky-num{background:#161b22}
 table{width:100%;border-collapse:separate;border-spacing:0;font-size:0.78em}
-th{text-align:left;padding:8px 10px;background:#1c2128;color:#8b949e;font-weight:normal;border-bottom:2px solid #30363d;white-space:nowrap}
+th{text-align:left;padding:8px 10px;background:#1c2128;color:#8b949e;font-weight:normal;border-bottom:2px solid #30363d;white-space:nowrap;position:sticky;top:84px;z-index:5}
 td{padding:6px 10px;border-bottom:1px solid #21262d;vertical-align:middle}
 tr:hover td{background:#161b22}
 tr.selected td{background:#1a1630}
@@ -629,14 +629,14 @@ function goPage(pg) {
     if (tbl) tbl.scrollIntoView({ behavior: 'smooth' });
 }
 
-// 单行勾选/取消
+// 单行勾选/取消（不重建页面，仅更新按钮计数）
 function toggleRow(i) {
     if (_selectedRows.has(i)) _selectedRows.delete(i);
     else _selectedRows.add(i);
-    renderContent(); // 刷新按钮计数和全选状态
+    refreshSelectBtn();
 }
 
-// 全选/取消本页
+// 全选/取消本页（不重建页面）
 function toggleSelectAll() {
     const findings = findingsMap[selectedModelId] || [];
     const startIdx = currentPage * PAGE_SIZE;
@@ -644,10 +644,27 @@ function toggleSelectAll() {
     const allChecked = Array.from({ length: endIdx - startIdx }, (_, pi) => startIdx + pi).every(i => _selectedRows.has(i));
     if (allChecked) {
         for (let i = startIdx; i < endIdx; i++) _selectedRows.delete(i);
+        document.getElementById('selectAllCb').checked = false;
     } else {
         for (let i = startIdx; i < endIdx; i++) _selectedRows.add(i);
+        document.getElementById('selectAllCb').checked = true;
     }
-    renderContent();
+    // 同步更新当前页所有checkbox
+    for (let i = startIdx; i < endIdx; i++) {
+        const cb = document.querySelector('input[type=checkbox][onclick*="toggleRow(' + i + ')"]');
+        if (cb) cb.checked = _selectedRows.has(i);
+    }
+    refreshSelectBtn();
+}
+
+// 更新测试按钮文字和状态（轻量DOM操作，不重建页面）
+function refreshSelectBtn() {
+    const selCount = _selectedRows.size;
+    const btn = document.querySelector('.section-actions button[onclick*="geocodeSelected"]');
+    if (btn) {
+        btn.textContent = '📍 测试勾选(' + selCount + '条)';
+        btn.disabled = (selCount === 0);
+    }
 }
 
 // 单次地理编码请求
