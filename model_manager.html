@@ -344,6 +344,7 @@ function renderContent() {
         html += '<button class="btn-normal" onclick="importFindingsJSON()">📤 导入JSON</button>';
         html += '<button class="btn-normal" onclick="exportFindingsJSON()">📥 导出JSON</button>';
         if (findings.length > 0) {
+            html += '<button class="btn-normal" onclick="batchGeocode()">📍 地址→坐标</button>';
             html += '<button class="btn-danger" onclick="batchClearFindings()">🗑 批量清空</button>';
         }
         html += '</div></div>';
@@ -603,6 +604,140 @@ function deleteFinding(idx) {
     renderContent();
     renderModelList();
     showToast('疑点已删除');
+}
+
+// ===================================================================
+//  WGS-84 ↔ GCJ-02 坐标转换（高德返回GCJ-02，需转为WGS-84存储）
+// ===================================================================
+const GeoPI = Math.PI, GeoAX = 6378245, GeoEE = 0.00669342162296594323;
+function _geoTLat(x, y) { let r = -100 + 2*x + 3*y + 0.2*y*y + 0.1*x*y + 0.2*Math.sqrt(Math.abs(x)); r += (20*Math.sin(6*x*GeoPI)+20*Math.sin(2*x*GeoPI))*2/3; r += (20*Math.sin(y*GeoPI)+40*Math.sin(y/3*GeoPI))*2/3; r += (160*Math.sin(y/12*GeoPI)+320*Math.sin(y*GeoPI/30))*2/3; return r; }
+function _geoTLon(x, y) { let r = 300 + x + 2*y + 0.1*x*x + 0.1*x*y + 0.1*Math.sqrt(Math.abs(x)); r += (20*Math.sin(6*x*GeoPI)+20*Math.sin(2*x*GeoPI))*2/3; r += (20*Math.sin(x*GeoPI)+40*Math.sin(x/3*GeoPI))*2/3; r += (150*Math.sin(x/12*GeoPI)+300*Math.sin(x/30*GeoPI))*2/3; return r; }
+function wgs2gcj(lng, lat) { const dLat = _geoTLat(lng-105,lat-35), dLon = _geoTLon(lng-105,lat-35); const r = lat/180*GeoPI; const m = 1 - GeoEE*Math.sin(r)*Math.sin(r); const s = Math.sqrt(m); return { lng: lng + dLon*180/(GeoAX/s*Math.cos(r)*GeoPI), lat: lat + dLat*180/(GeoAX*(1-GeoEE)/(m*s)*GeoPI) }; }
+function gcj2wgs(lng, lat) { let w = { lng, lat }; for (let i = 0; i < 5; i++) { const t = wgs2gcj(w.lng, w.lat); w.lng += lng - t.lng; w.lat += lat - t.lat; } return w; }
+
+// ===================================================================
+//  批量地址→坐标（使用高德地理编码，需先在主工具中配置高德Key）
+// ===================================================================
+let _geocodeRunning = false, _geocodeAborted = false;
+
+async function batchGeocode() {
+    const findings = findingsMap[selectedModelId] || [];
+    if (!findings.length) { showToast('无疑点数据'); return; }
+
+    // 读取高德Key
+    const amapKey = localStorage.getItem('audit_amap_key') || '';
+    if (!amapKey) { showToast('请先在主工具页面顶部配置高德Key并保存', true); return; }
+
+    // 统计需要地理编码的疑点（有地址但无坐标的）
+    const needGeocode = [];
+    findings.forEach((f, i) => {
+        const addr = f.addr || f['发电地址'] || f['地址'] || f['位置'] || '';
+        if (addr && String(addr).trim().length > 3 && (!f.lng || !f.lat || f.lng === 0)) {
+            needGeocode.push({ idx: i, addr: String(addr).trim() });
+        }
+    });
+
+    if (!needGeocode.length) {
+        showToast('所有疑点已有坐标数据，无需地理编码');
+        return;
+    }
+
+    if (!confirm('将为 ' + needGeocode.length + ' 条疑点（无坐标）进行地址→坐标转换。\n\n使用高德地理编码，每秒约10条，预计耗时 ' + Math.ceil(needGeocode.length/10) + ' 秒。\n\n确定开始？')) return;
+
+    // 创建进度弹窗
+    showGeocodeProgress(needGeocode.length);
+    _geocodeRunning = true; _geocodeAborted = false;
+
+    let success = 0, fail = 0;
+    for (let j = 0; j < needGeocode.length; j++) {
+        if (_geocodeAborted) break;
+        const item = needGeocode[j];
+        try {
+            const url = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+                '&address=' + encodeURIComponent(item.addr) + '&output=JSON';
+            const r = await fetch(url), d = await r.json();
+            if (d.status === '1' && d.geocodes && d.geocodes.length) {
+                const loc = d.geocodes[0].location.split(',');
+                const gcjLng = parseFloat(loc[0]), gcjLat = parseFloat(loc[1]);
+                const wgs = gcj2wgs(gcjLng, gcjLat);
+                findings[item.idx].lng = Math.round(wgs.lng * 1000000) / 1000000;
+                findings[item.idx].lat = Math.round(wgs.lat * 1000000) / 1000000;
+                success++;
+            } else {
+                // 降级：尝试去掉地址尾部再搜
+                const shortAddr = item.addr.replace(/[\d\-]+号.*$/, '').trim();
+                if (shortAddr !== item.addr && shortAddr.length > 3) {
+                    const url2 = 'https://restapi.amap.com/v3/geocode/geo?key=' + amapKey +
+                        '&address=' + encodeURIComponent(shortAddr) + '&output=JSON';
+                    const r2 = await fetch(url2), d2 = await r2.json();
+                    if (d2.status === '1' && d2.geocodes && d2.geocodes.length) {
+                        const loc2 = d2.geocodes[0].location.split(',');
+                        const gcjLng2 = parseFloat(loc2[0]), gcjLat2 = parseFloat(loc2[1]);
+                        const wgs2 = gcj2wgs(gcjLng2, gcjLat2);
+                        findings[item.idx].lng = Math.round(wgs2.lng * 1000000) / 1000000;
+                        findings[item.idx].lat = Math.round(wgs2.lat * 1000000) / 1000000;
+                        success++;
+                    } else { fail++; }
+                } else { fail++; }
+            }
+        } catch(e) { fail++; }
+        // 更新进度
+        updateGeocodeProgress(j + 1, needGeocode.length, success, fail);
+        // 速率控制：约每秒10次
+        if (j % 8 === 0 && j > 0) await new Promise(r => setTimeout(r, 1000));
+    }
+
+    _geocodeRunning = false;
+    saveData();
+    renderContent();
+    renderModelList();
+    finalizeGeocodeProgress(success, fail);
+}
+
+// 进度弹窗
+function showGeocodeProgress(total) {
+    let overlay = document.getElementById('geocodeModal');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'geocodeModal';
+        overlay.className = 'modal-overlay';
+        document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = '<div class="modal" style="width:450px;text-align:center">' +
+        '<h3 style="color:#d2a8ff">📍 批量地址→坐标</h3>' +
+        '<div id="geocodeBar" style="width:100%;height:8px;background:#21262d;border-radius:4px;margin:16px 0;overflow:hidden">' +
+        '<div id="geocodeFill" style="width:0%;height:100%;background:#3fb950;transition:width 0.3s;border-radius:4px"></div></div>' +
+        '<div id="geocodeStatus" style="color:#c9d1d9;font-size:0.85em">准备中...</div>' +
+        '<div id="geocodeDetail" style="color:#8b949e;font-size:0.72em;margin-top:4px"></div>' +
+        '<button class="btn-normal" onclick="abortGeocode()" style="margin-top:12px;color:#ff7b72">中止</button>' +
+        '</div>';
+    overlay.style.display = 'flex';
+}
+
+function updateGeocodeProgress(done, total, success, fail) {
+    const fill = document.getElementById('geocodeFill');
+    const status = document.getElementById('geocodeStatus');
+    const detail = document.getElementById('geocodeDetail');
+    if (fill) fill.style.width = (done / total * 100) + '%';
+    if (status) status.textContent = done + ' / ' + total + '  ✅' + success + '  ❌' + fail;
+    if (detail) detail.textContent = '速度: ~8条/秒，剩余约 ' + Math.ceil((total - done) / 8) + ' 秒';
+}
+
+function abortGeocode() {
+    _geocodeAborted = true;
+    const status = document.getElementById('geocodeStatus');
+    if (status) status.textContent = '⏸ 已中止，正在保存已处理的数据...';
+}
+
+function finalizeGeocodeProgress(success, fail) {
+    const overlay = document.getElementById('geocodeModal');
+    if (!overlay) return;
+    overlay.innerHTML = '<div class="modal" style="width:450px;text-align:center">' +
+        '<h3 style="color:#3fb950">✅ 批量地理编码完成</h3>' +
+        '<div style="font-size:1.2em;margin:16px 0;color:#c9d1d9">📍 成功 <b style="color:#3fb950">' + success + '</b> 条 | 失败 <b style="color:#ff7b72">' + fail + '</b> 条</div>' +
+        '<div style="color:#8b949e;font-size:0.78em">坐标已保存为WGS-84格式</div>' +
+        '<button class="btn-accent" onclick="document.getElementById(\'geocodeModal\').style.display=\'none\'" style="margin-top:12px">关闭</button>' +
+        '</div>';
 }
 
 let editFindingModal = null;
