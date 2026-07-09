@@ -61,20 +61,16 @@ body{font-family:'Microsoft YaHei',sans-serif;background:#0d1117;color:#c9d1d9;h
 .form-row .form-group{flex:1}
 
 /* Findings table */
-.table-wrap{margin-top:8px}
-.table-header{overflow:hidden;border-bottom:2px solid #30363d}
-.table-body{overflow:auto;max-height:calc(100vh - 260px)}
-.table-header table,.table-body table{table-layout:fixed;width:max(100%,1200px)}
-.table-body td.sticky-chk,.table-body td.sticky-num,.table-header th.sticky-chk,.table-header th.sticky-num{position:sticky;z-index:2}
-.table-body td.sticky-chk,.table-header th.sticky-chk{left:0;min-width:28px}
-.table-body td.sticky-num,.table-header th.sticky-num{left:28px;min-width:30px}
-.table-header th.sticky-chk,.table-header th.sticky-num{z-index:4}
-.table-body td.sticky-chk{background:#0d1117}
-.table-body td.sticky-num{background:#0d1117;box-shadow:3px 0 8px rgba(0,0,0,0.5)}
+.table-wrap{overflow-x:auto;margin-top:8px}
+.table-wrap th.sticky-chk,.table-wrap td.sticky-chk{position:sticky;left:0;z-index:2;min-width:28px}
+.table-wrap th.sticky-num,.table-wrap td.sticky-num{position:sticky;left:28px;z-index:2;min-width:30px}
+.table-wrap th.sticky-chk,.table-wrap th.sticky-num{z-index:6;background:#1c2128}
+.table-wrap td.sticky-chk{background:#0d1117}
+.table-wrap td.sticky-num{background:#0d1117;box-shadow:3px 0 8px rgba(0,0,0,0.5)}
 tr.selected td.sticky-chk,tr.selected td.sticky-num{background:#1a1630}
 tr:hover td.sticky-chk,tr:hover td.sticky-num{background:#161b22}
-table{width:max(100%,1200px);border-collapse:collapse;font-size:0.78em}
-th{text-align:left;padding:8px 10px;background:#1c2128;color:#8b949e;font-weight:normal;white-space:nowrap}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:0.78em}
+th{text-align:left;padding:8px 10px;background:#1c2128;color:#8b949e;font-weight:normal;border-bottom:2px solid #30363d;white-space:nowrap;position:sticky;top:84px;z-index:5}
 td{padding:6px 10px;border-bottom:1px solid #21262d;vertical-align:middle}
 tr:hover td{background:#161b22}
 tr.selected td{background:#1a1630}
@@ -382,19 +378,15 @@ function renderContent() {
             const endIdx = Math.min(startIdx + PAGE_SIZE, findings.length);
             const pageFindings = findings.slice(startIdx, endIdx);
 
-            html += '<div class="table-wrap">';
-            // ★ 表头独立容器（不滚动）
-            html += '<div class="table-header" id="tableHeader"><table><thead><tr>';
+            html += '<div class="table-wrap"><table><thead><tr>';
             html += '<th class="sticky-chk"><input type="checkbox" id="selectAllCb" onclick="toggleSelectAll()" style="cursor:pointer;accent-color:#7c3aed" ' + (pageFindings.every((f, pi) => _selectedRows.has(startIdx + pi)) ? 'checked' : '') + '></th>';
             html += '<th class="sticky-num">#</th>';
             const cols = buildColumns(findings);
             const mForLabel = models.find(x => x.id === selectedModelId);
             cols.forEach(col => { html += '<th>' + escHtml(colLabel(col, mForLabel)) + '</th>'; });
             html += '<th style="width:80px">操作</th>';
-            html += '</tr></thead></table></div>';
+            html += '</tr></thead><tbody>';
 
-            // ★ 表体滚动容器
-            html += '<div class="table-body" id="tableBody" onscroll="syncHeaderScroll()"><table><tbody>';
             for (let pi = 0; pi < pageFindings.length; pi++) {
                 const f = pageFindings[pi];
                 const i = startIdx + pi;
@@ -414,7 +406,7 @@ function renderContent() {
                 html += '<button class="danger" onclick="deleteFinding(' + i + ')" title="删除">🗑</button>';
                 html += '</td></tr>';
             }
-            html += '</tbody></table></div></div>';
+            html += '</tbody></table></div>';
 
             // ★ 分页导航
             if (totalPages > 1) {
@@ -442,7 +434,6 @@ function renderContent() {
     }
 
     document.getElementById('contentArea').innerHTML = html;
-    setTimeout(fixHeaderWidth, 50);
 }
 
 function switchTab(tab) {
@@ -674,24 +665,6 @@ function refreshSelectBtn() {
         btn.disabled = (selCount === 0);
     }
 }
-
-// 表头/表体水平滚动同步 + 宽度对齐（补偿滚动条）
-function syncHeaderScroll() {
-    const body = document.getElementById('tableBody');
-    const header = document.getElementById('tableHeader');
-    if (body && header) header.scrollLeft = body.scrollLeft;
-}
-function fixHeaderWidth() {
-    const body = document.getElementById('tableBody');
-    const header = document.getElementById('tableHeader');
-    if (body && header) {
-        // 补偿表体垂直滚动条宽度
-        const sbw = body.offsetWidth - body.clientWidth;
-        header.style.paddingRight = sbw + 'px';
-    }
-}
-// 页面渲染后执行一次宽度修复
-setTimeout(fixHeaderWidth, 100);
 
 // 单次地理编码请求
 // 策略：完整地址 → (失败) 去门牌 → (失败) 去路名，每个变体发1次
