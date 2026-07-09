@@ -346,9 +346,10 @@ function renderContent() {
         } else {
             html += '<div class="table-wrap"><table><thead><tr>';
             html += '<th style="width:30px">#</th>';
-            // Build columns from fields config
+            // Build columns from fields config — 表头用中文字段名
             const cols = buildColumns(findings);
-            cols.forEach(col => { html += '<th>' + col + '</th>'; });
+            const mForLabel = models.find(x => x.id === selectedModelId);
+            cols.forEach(col => { html += '<th>' + escHtml(colLabel(col, mForLabel)) + '</th>'; });
             html += '<th style="width:80px">操作</th>';
             html += '</tr></thead><tbody>';
             findings.forEach((f, i) => {
@@ -377,50 +378,99 @@ function switchTab(tab) {
 }
 
 // ===================================================================
-//  Column inference from findings
+// ===================================================================
+//  Column inference from findings — 严格按照模型 fields 配置的顺序
 // ===================================================================
 function buildColumns(findings) {
-    const seen = new Set();
-    const cols = [];
-    // Mandatory columns first
-    ['id','name','addr','lng','lat'].forEach(c => { seen.add(c); cols.push(c); });
-    // Then from fields config
     const m = models.find(x => x.id === selectedModelId);
+    const orderedKeys = [];
+    const seen = new Set();
+
+    // 中文字段名 → 英文 key 映射表
+    const fieldKeyMap = {
+        '户名':'name','地址':'addr','并网容量(kW)':'capacity','并网容量':'capacity',
+        '并网时间':'gridDate','月均发电小时':'monthlyHours','编号':'id',
+        '经度':'lng','纬度':'lat','容量':'capacity','月发电':'monthlyHours',
+        '电站名称':'name','装机容量(MW)':'capacity','占地类型':'landType','合规状态':'compliance',
+        '地块编号':'id','位置':'addr','占地面积(亩)':'area','原用途':'origUse','现用途':'curUse','变化年份':'changeYear',
+        '水体名称':'name','面积(km²)':'area','水质等级':'waterGrade','异常类型':'anomalyType','检测时间':'detectDate',
+        '区域名称':'name','变化面积(ha)':'area','NDVI变化量':'ndviChange','变化时间段':'changePeriod','疑似原因':'suspectedCause',
+        '项目名称':'name','规划面积(ha)':'planArea','实际面积(ha)':'actualArea','超出比例':'exceedRatio','发现时间':'detectDate',
+        '矿山名称':'name','矿权面积(ha)':'rightsArea','越界面积(ha)':'overArea','越界方向':'overDir',
+        '林班编号':'id','砍伐面积(ha)':'cutArea','审批面积(ha)':'approvedArea','差异面积(ha)':'diffArea',
+        '堆放点编号':'id','占地面积(m²)':'area','疑似类型':'suspectType','距离居民区(m)':'distToResident',
+        '岸段编号':'id','变化长度(m)':'changeLength','变化类型':'changeType','变化速率(m/年)':'changeRate','是否审批':'isApproved',
+        '坐标':'lat','位置坐标':'addr'
+    };
+
+    // ★ 核心：按模型 fields 配置的顺序生成列
     if (m && m.fields) {
         const fieldNames = m.fields.split(',').map(s => s.trim()).filter(Boolean);
-        // Map Chinese field names to keys
-        const fieldKeyMap = {
-            '户名':'name','地址':'addr','并网容量(kW)':'capacity','并网容量':'capacity',
-            '并网时间':'gridDate','月均发电小时':'monthlyHours','编号':'id',
-            '经度':'lng','纬度':'lat','容量':'capacity','月发电':'monthlyHours',
-            '电站名称':'name','装机容量(MW)':'capacity','占地类型':'landType','合规状态':'compliance',
-            '地块编号':'id','位置':'addr','占地面积(亩)':'area','原用途':'origUse','现用途':'curUse','变化年份':'changeYear',
-            '水体名称':'name','面积(km²)':'area','水质等级':'waterGrade','异常类型':'anomalyType','检测时间':'detectDate',
-            '区域名称':'name','变化面积(ha)':'area','NDVI变化量':'ndviChange','变化时间段':'changePeriod','疑似原因':'suspectedCause',
-            '项目名称':'name','规划面积(ha)':'planArea','实际面积(ha)':'actualArea','超出比例':'exceedRatio','发现时间':'detectDate',
-            '矿山名称':'name','矿权面积(ha)':'rightsArea','越界面积(ha)':'overArea','越界方向':'overDir',
-            '林班编号':'id','砍伐面积(ha)':'cutArea','审批面积(ha)':'approvedArea','差异面积(ha)':'diffArea',
-            '堆放点编号':'id','占地面积(m²)':'area','疑似类型':'suspectType','距离居民区(m)':'distToResident',
-            '岸段编号':'id','变化长度(m)':'changeLength','变化类型':'changeType','变化速率(m/年)':'changeRate','是否审批':'isApproved',
-            '坐标':'lat','位置坐标':'addr'
-        };
         fieldNames.forEach(fn => {
             const key = fieldKeyMap[fn] || fn;
-            if (!seen.has(key)) { seen.add(key); cols.push(key); }
+            if (!seen.has(key)) {
+                seen.add(key);
+                orderedKeys.push(key);
+            }
         });
     }
-    // Then any other keys in findings
+
+    // 兜底：如果 fields 未配置，用默认顺序
+    if (!orderedKeys.length) {
+        ['id','name','addr','capacity','gridDate','monthlyHours'].forEach(k => {
+            if (!seen.has(k)) { seen.add(k); orderedKeys.push(k); }
+        });
+    }
+
+    // 附加：数据中存在但 fields 未配置的额外字段（排在配置字段之后）
     findings.forEach(f => {
         Object.keys(f).forEach(k => {
-            if (!seen.has(k)) { seen.add(k); cols.push(k); }
+            if (!seen.has(k)) { seen.add(k); orderedKeys.push(k); }
         });
     });
-    // Move lng/lat to end
-    const preferred = ['id','name','addr','capacity','gridDate','monthlyHours'];
-    const ordered = [];
-    preferred.forEach(p => { if (cols.includes(p)) { ordered.push(p); seen.delete(p); } });
-    cols.forEach(c => { if (!preferred.includes(c)) ordered.push(c); });
-    return ordered;
+
+    // lng/lat 始终移到最后（坐标字段不适合作为主要展示列）
+    const finalCols = orderedKeys.filter(k => k !== 'lng' && k !== 'lat');
+    // 如果数据中有坐标字段，追加到末尾
+    if (orderedKeys.includes('lng')) finalCols.push('lng');
+    if (orderedKeys.includes('lat')) finalCols.push('lat');
+
+    return finalCols;
+}
+
+// 英文字段 key → 中文显示名（用于表头）
+function colLabel(key, model) {
+    const keyToCn = {
+        'id':'编号','name':'名称','addr':'地址','lng':'经度','lat':'纬度',
+        'capacity':'容量','gridDate':'并网时间','monthlyHours':'月发电小时',
+        'area':'面积','landType':'占地类型','compliance':'合规状态',
+        'origUse':'原用途','curUse':'现用途','changeYear':'变化年份',
+        'waterGrade':'水质等级','anomalyType':'异常类型','detectDate':'检测时间',
+        'ndviChange':'NDVI变化量','changePeriod':'变化时间段','suspectedCause':'疑似原因',
+        'planArea':'规划面积','actualArea':'实际面积','exceedRatio':'超出比例',
+        'rightsArea':'矿权面积','overArea':'越界面积','overDir':'越界方向',
+        'cutArea':'砍伐面积','approvedArea':'审批面积','diffArea':'差异面积',
+        'suspectType':'疑似类型','distToResident':'距离居民区',
+        'changeLength':'变化长度','changeType':'变化类型','changeRate':'变化速率','isApproved':'是否审批'
+    };
+    // 如果模型 fields 中有自定义中文名，优先使用
+    if (model && model.fields) {
+        const fieldNames = model.fields.split(',').map(s => s.trim()).filter(Boolean);
+        // 尝试匹配：找到 key 对应的中文字段名
+        for (const fn of fieldNames) {
+            // 简单启发式：如果字段名的常见英文映射命中，就用中文
+            if (key === 'name' && fn.includes('名')) return fn;
+            if (key === 'addr' && (fn.includes('地址') || fn.includes('位置'))) return fn;
+            if (key === 'capacity' && fn.includes('容量')) return fn;
+            if (key === 'gridDate' && (fn.includes('时间') || fn.includes('日期'))) return fn;
+            if (key === 'monthlyHours' && fn.includes('小时')) return fn;
+            if (key === 'area' && fn.includes('面积')) return fn;
+            if (key === 'lng' && fn.includes('经')) return fn;
+            if (key === 'lat' && fn.includes('纬')) return fn;
+            if (key === 'id' && (fn.includes('编号') || fn.includes('号'))) return fn;
+        }
+    }
+    return keyToCn[key] || key;
 }
 
 // ===================================================================
