@@ -870,48 +870,64 @@ function switchActiveYear() {
 
 // ===================================================================
 //  十四、地理编码搜索
-//  高德优先：地理编码(geocode) + 输入提示(inputtips) 双路并行
-//  自动提取省市区作为city参数缩小搜索范围
-//  渐进式降级：完整地址 → 镇级 → 县级
+//  核心策略：POI关键词搜索（村镇地址最有效）> 地理编码 > 输入提示
+//  解析地址 → 提取行政区划(region) + 地名关键词 → POI搜索 + 地理编码并行
 // ===================================================================
 let _searchCache=[];
 
 function bd2wgs(lng, lat) { const gcj = bd2gcj(lng, lat); return gcj2wgs(gcj.lng, gcj.lat); }
 
-// 从地址中提取可能的行政区划名称（用作city参数缩小搜索范围）
-function extractCityHint(q) {
-    // 匹配 "XX省XX市XX县/区/镇/乡/街道"
-    const patterns = [
-        /([一-龥]{2,10}(?:市|县|区|旗))[一-龥]{2,10}(?:镇|乡|街道|路|街)/,  // XX市/县 + 后面紧跟镇/路
-        /([一-龥]{2,10}(?:市|县|区|旗))/,   // 最后的市/县/区
-        /([一-龥]{2,6}(?:镇|乡|街道))/       // 镇/乡/街道
-    ];
-    for (const p of patterns) {
-        const m = q.match(p);
-        if (m && m[1] && m[1].length >= 2) return m[1];
+// 解析中文地址，提取结构化组件
+function parseAddress(q) {
+    const result = {
+        province: '', city: '', district: '', town: '', road: '', number: '',
+        region: '',     // 用作API的city/region参数（区县级）
+        poiKeywords: [] // 用作POI搜索关键词（从精确到模糊）
+    };
+    // 按层级提取
+    const mProv = q.match(/([一-龥]{2,10}(?:省|自治区|特别行政区))/);
+    const mCity = q.match(/([一-龥]{2,10}(?:市|自治州|地区|盟))(?![\x00-\xff]*[县区])/);
+    if (!mCity) {
+        // 尝试匹配"XX市"形式（包括"徐州市"这种）
+        const m2 = q.match(/([一-龥]{2,6}市)/);
+        if (m2) result.city = m2[1];
+    } else {
+        result.city = mCity[1];
     }
-    return '';
-}
+    const mDist = q.match(/([一-龥]{2,8}(?:县|区|县级市|旗|自治县))/);
+    const mTown = q.match(/([一-龥]{2,8}(?:镇|乡|街道|苏木))/);
+    const mRoad = q.match(/([一-龥]{2,20}(?:路|街|巷|道|弄|大道|大街|公路))/);
+    const mNum = q.match(/([\d\-—–]+号?)/);
 
-// 渐进式地址简化 — 生成从精确到模糊的搜索变体
-function progressiveQueries(q) {
-    const results = [q];
-    // 去末尾门牌号 (如 "210-6号", "210号", "10幢")
-    let s = q.replace(/[\d\-—–]+号?$/g, '').replace(/[\d]+幢$/g, '').replace(/[，,]\s*$/, '').trim();
-    if (s && s !== q && s.length > 5) results.push(s);
-    // 再去掉 "XX路/街/巷" 之后的数字后缀
-    s = s.replace(/([路街巷道弄])\d.*$/, '$1').trim();
-    if (s && !results.includes(s) && s.length > 5) results.push(s);
-    // 去掉路名本身，只保留行政区划
-    s = s.replace(/[路街巷道弄]\S*$/, '').replace(/[路街巷道弄]$/, '').trim();
-    if (s && !results.includes(s) && s.length > 4) results.push(s);
-    // 只留到镇/乡/街道
-    const m = q.match(/(.+[镇乡街道])/);
-    if (m && m[1] && !results.includes(m[1]) && m[1].length > 3) results.push(m[1]);
-    // 只留到县/区/市
-    const m2 = q.match(/(.+[市县区旗])/);
-    if (m2 && m2[1] && !results.includes(m2[1]) && m2[1].length > 3) results.push(m2[1]);
-    return results;
+    if (mProv) result.province = mProv[1];
+    if (mDist) result.district = mDist[1];
+    if (mTown) result.town = mTown[1];
+    if (mRoad) result.road = mRoad[1];
+    if (mNum) result.number = mNum[1];
+
+    // region：优先区县级，否则市级
+    result.region = result.district || result.city || '';
+
+    // POI关键词：从最精确到模糊排列
+    const kw = [];
+    // 镇+路+号 → 最精确（如"安国镇汉王路210-6号"）
+    if (mTown && mRoad && mNum) kw.push(mTown[1] + mRoad[1] + mNum[1]);
+    // 镇+路（如"安国镇汉王路"）
+    if (mTown && mRoad) kw.push(mTown[1] + mRoad[1]);
+    // 路+号（如"汉王路210-6号"）
+    if (mRoad && mNum) kw.push(mRoad[1] + mNum[1]);
+    // 路名单独
+    if (mRoad) kw.push(mRoad[1]);
+    // 镇名单独
+    if (mTown) kw.push(mTown[1]);
+    // 镇+路的一部分（去"路"字变体，如"安国镇汉王"）
+    if (mTown && mRoad) {
+        const roadBase = mRoad[1].replace(/[路街巷道弄大道大街公路]$/, '');
+        if (roadBase.length > 0) kw.push(mTown[1] + roadBase);
+    }
+
+    result.poiKeywords = [...new Set(kw)]; // 去重
+    return result;
 }
 
 async function doSearch() {
@@ -928,61 +944,38 @@ async function doSearch() {
             setTimeout(() => rd.style.display = 'none', 2000); return;
         }
 
-        const cityHint = extractCityHint(q);
-        const queries = progressiveQueries(q);
+        const addr = parseAddress(q);
         const usedServices = [];
         const allResults = [];
         const seen = new Set();
 
-        // 搜索策略：对每个地址变体并行搜索，用city参数缩小范围
-        for (const query of queries) {
-            const tasks = [];
+        // ==========================================================
+        // 搜索阶段 — 全部请求并行发射
+        // ==========================================================
+        const tasks = [];
 
-            if (AMAP_KEY) {
-                if (!usedServices.includes('🗺️高德')) usedServices.push('🗺️高德');
+        if (AMAP_KEY) {
+            usedServices.push('🗺️高德');
+            const region = addr.region;
 
-                // A. 高德地理编码 — 带city参数
+            // ★ 核心：高德POI关键词搜索 — 对村镇地址最有效
+            for (const kw of addr.poiKeywords) {
                 tasks.push((async () => {
-                    let url = 'https://restapi.amap.com/v3/geocode/geo?key=' + AMAP_KEY +
-                        '&address=' + encodeURIComponent(query) + '&output=JSON';
-                    if (cityHint) url += '&city=' + encodeURIComponent(cityHint);
+                    let url = 'https://restapi.amap.com/v3/place/text?key=' + AMAP_KEY +
+                        '&keywords=' + encodeURIComponent(kw) + '&offset=20&extensions=all&output=JSON';
+                    if (region) url += '&city=' + encodeURIComponent(region);
                     const r = await fetch(url), d = await r.json();
-                    if (d.status === '1' && d.geocodes && d.geocodes.length) {
-                        return d.geocodes.map(x => {
-                            const parts = (x.location || '').split(',');
+                    if (d.status === '1' && d.pois && d.pois.length) {
+                        return d.pois.map(p => {
+                            const parts = (p.location || '').split(',');
                             const gcjLng = parseFloat(parts[0]) || 0, gcjLat = parseFloat(parts[1]) || 0;
                             const wgs = gcj2wgs(gcjLng, gcjLat);
                             return {
-                                name: x.formatted_address ? x.formatted_address.split(/[,，]/)[0] : '高德结果',
-                                addr: x.formatted_address || query,
-                                lng: wgs.lng, lat: wgs.lat, source: '高德',
-                                query: query, level: x.level || ''
-                            };
-                        }).filter(x => x.lng && x.lat);
-                    }
-                    return [];
-                })());
-
-                // B. 高德输入提示API — 专为地址补全设计，对模糊匹配更友好
-                tasks.push((async () => {
-                    let url = 'https://restapi.amap.com/v3/assistant/inputtips?key=' + AMAP_KEY +
-                        '&keywords=' + encodeURIComponent(query) + '&output=JSON';
-                    if (cityHint) url += '&city=' + encodeURIComponent(cityHint);
-                    const r = await fetch(url), d = await r.json();
-                    if (d.status === '1' && d.tips && d.tips.length) {
-                        return d.tips.filter(t => t.location && t.location.length > 0).map(t => {
-                            const parts = (t.location || '').split(',');
-                            const gcjLng = parseFloat(parts[0]) || 0, gcjLat = parseFloat(parts[1]) || 0;
-                            const wgs = gcj2wgs(gcjLng, gcjLat);
-                            const name = t.name || '';
-                            const district = t.district || '';
-                            const addr = t.address || '';
-                            const fullAddr = [addr, district, name].filter(Boolean).join('') || query;
-                            return {
-                                name: name || fullAddr,
-                                addr: fullAddr,
-                                lng: wgs.lng, lat: wgs.lat, source: '高德提示',
-                                query: query, level: ''
+                                name: p.name || kw,
+                                addr: p.address || '',
+                                lng: wgs.lng, lat: wgs.lat, source: '高德POI',
+                                query: kw, level: p.type || '',
+                                type: p.type || '', bizExt: p.biz_ext || {}
                             };
                         }).filter(x => x.lng && x.lat);
                     }
@@ -990,96 +983,173 @@ async function doSearch() {
                 })());
             }
 
-            if (BAIDU_KEY) {
-                if (!usedServices.includes('🔍百度')) usedServices.push('🔍百度');
-                tasks.push((async () => {
-                    const url = 'https://api.map.baidu.com/geocoding/v3/?address=' +
-                        encodeURIComponent(query) + '&output=json&ak=' + BAIDU_KEY +
-                        (cityHint ? '&city=' + encodeURIComponent(cityHint) : '');
-                    const r = await fetch(url), d = await r.json();
-                    if (d.status === 0 && d.result && d.result.location) {
-                        const loc = d.result.location;
-                        const wgs = bd2wgs(loc.lng, loc.lat);
-                        return [{
-                            name: d.result.name || d.result.formatted_address || '百度结果',
-                            addr: d.result.formatted_address || query,
-                            lng: wgs.lng, lat: wgs.lat, source: '百度',
-                            query: query, level: d.result.level || ''
-                        }];
-                    }
-                    return [];
-                })());
-            }
-
-            // OSM 兜底
-            if (!AMAP_KEY && !BAIDU_KEY) {
-                if (!usedServices.includes('🌐OSM')) usedServices.push('🌐OSM');
-            }
+            // 高德地理编码（完整地址，带region限定）
             tasks.push((async () => {
-                const url = 'https://nominatim.openstreetmap.org/search?q=' +
-                    encodeURIComponent(query) + '&format=json&limit=10&accept-language=zh';
-                const r = await fetch(url);
-                if (!r.ok) return [];
-                const d = await r.json();
-                return d.map(x => ({
-                    name: x.display_name.split(',')[0] || '未知',
-                    addr: x.display_name || '',
-                    lng: parseFloat(x.lon) || 0, lat: parseFloat(x.lat) || 0,
-                    source: 'OSM', query: query
-                })).filter(x => x.lng && x.lat);
+                let url = 'https://restapi.amap.com/v3/geocode/geo?key=' + AMAP_KEY +
+                    '&address=' + encodeURIComponent(q) + '&output=JSON';
+                if (region) url += '&city=' + encodeURIComponent(region);
+                const r = await fetch(url), d = await r.json();
+                if (d.status === '1' && d.geocodes && d.geocodes.length) {
+                    return d.geocodes.map(x => {
+                        const parts = (x.location || '').split(',');
+                        const gcjLng = parseFloat(parts[0]) || 0, gcjLat = parseFloat(parts[1]) || 0;
+                        const wgs = gcj2wgs(gcjLng, gcjLat);
+                        return {
+                            name: x.formatted_address ? x.formatted_address.split(/[,，]/)[0] : q,
+                            addr: x.formatted_address || q,
+                            lng: wgs.lng, lat: wgs.lat, source: '高德',
+                            query: q, level: x.level || ''
+                        };
+                    }).filter(x => x.lng && x.lat);
+                }
+                return [];
             })());
 
-            const batches = await Promise.all(tasks);
-            for (const r of batches.flat()) {
-                const k = r.lng.toFixed(4) + ',' + r.lat.toFixed(4);
-                if (!seen.has(k)) { seen.add(k); allResults.push(r); }
-            }
-
-            // 找到 ≥5 个精确结果就停止降级
-            if (allResults.length >= 5) break;
+            // 高德输入提示
+            tasks.push((async () => {
+                let url = 'https://restapi.amap.com/v3/assistant/inputtips?key=' + AMAP_KEY +
+                    '&keywords=' + encodeURIComponent(q) + '&output=JSON';
+                if (region) url += '&city=' + encodeURIComponent(region);
+                const r = await fetch(url), d = await r.json();
+                if (d.status === '1' && d.tips && d.tips.length) {
+                    return d.tips.filter(t => t.location && t.location.length > 0).map(t => {
+                        const parts = (t.location || '').split(',');
+                        const gcjLng = parseFloat(parts[0]) || 0, gcjLat = parseFloat(parts[1]) || 0;
+                        const wgs = gcj2wgs(gcjLng, gcjLat);
+                        return {
+                            name: t.name || '', addr: [t.address, t.district, t.name].filter(Boolean).join(''),
+                            lng: wgs.lng, lat: wgs.lat, source: '高德提示',
+                            query: q, level: ''
+                        };
+                    }).filter(x => x.lng && x.lat);
+                }
+                return [];
+            })());
         }
 
-        _searchCache = allResults;
+        if (BAIDU_KEY) {
+            usedServices.push('🔍百度');
+            const region = addr.region || addr.city;
 
-        // 智能排序：level越精细分越高 + 高德提示优先
-        const levelRank = { '门牌号': 10, 'POI': 9, '村庄': 8, '道路': 7, '乡镇': 5, '区县': 3, '城市': 1 };
-        const sourceRank = { '高德提示': 4, '高德': 3, '百度': 2, 'OSM': 1, '星图云': 2, '星图云POI': 2 };
-        _searchCache.sort((a, b) => {
-            const sa = (sourceRank[a.source] || 0) * 10 + (levelRank[a.level] || 0);
-            const sb = (sourceRank[b.source] || 0) * 10 + (levelRank[b.level] || 0);
+            // 百度POI搜索
+            for (const kw of addr.poiKeywords.slice(0, 3)) {
+                tasks.push((async () => {
+                    let url = 'https://api.map.baidu.com/place/v2/search?query=' +
+                        encodeURIComponent(kw) + '&page_size=20&scope=2&output=json&ak=' + BAIDU_KEY;
+                    if (region) url += '&region=' + encodeURIComponent(region);
+                    const r = await fetch(url), d = await r.json();
+                    if (d.status === 0 && d.results && d.results.length) {
+                        return d.results.map(p => {
+                            const wgs = bd2wgs(p.location.lng, p.location.lat);
+                            return {
+                                name: p.name || kw,
+                                addr: p.address || '',
+                                lng: wgs.lng, lat: wgs.lat, source: '百度POI',
+                                query: kw, level: p.detail_info ? p.detail_info.type : ''
+                            };
+                        }).filter(x => x.lng && x.lat);
+                    }
+                    return [];
+                })());
+            }
+
+            // 百度地理编码
+            tasks.push((async () => {
+                const url = 'https://api.map.baidu.com/geocoding/v3/?address=' +
+                    encodeURIComponent(q) + '&output=json&ak=' + BAIDU_KEY;
+                const r = await fetch(url), d = await r.json();
+                if (d.status === 0 && d.result && d.result.location) {
+                    const loc = d.result.location;
+                    const wgs = bd2wgs(loc.lng, loc.lat);
+                    return [{
+                        name: d.result.name || d.result.formatted_address || q,
+                        addr: d.result.formatted_address || q,
+                        lng: wgs.lng, lat: wgs.lat, source: '百度',
+                        query: q, level: d.result.level || ''
+                    }];
+                }
+                return [];
+            })());
+        }
+
+        // OSM 兜底
+        if (!AMAP_KEY && !BAIDU_KEY) usedServices.push('🌐OSM');
+        tasks.push((async () => {
+            const url = 'https://nominatim.openstreetmap.org/search?q=' +
+                encodeURIComponent(q) + '&format=json&limit=10&accept-language=zh';
+            const r = await fetch(url);
+            if (!r.ok) return [];
+            const d = await r.json();
+            return d.map(x => ({
+                name: x.display_name.split(',')[0] || '未知',
+                addr: x.display_name || '',
+                lng: parseFloat(x.lon) || 0, lat: parseFloat(x.lat) || 0,
+                source: 'OSM', query: q, level: ''
+            })).filter(x => x.lng && x.lat);
+        })());
+
+        // ==========================================================
+        // 合并去重排序
+        // ==========================================================
+        const batches = await Promise.all(tasks);
+        for (const r of batches.flat()) {
+            const k = r.lng.toFixed(4) + ',' + r.lat.toFixed(4);
+            if (!seen.has(k)) { seen.add(k); allResults.push(r); }
+        }
+
+        // 排序：POI优先 + 级别加分
+        const typeRank = { '门牌号': 20, '商务住宅': 15, '公司企业': 14, '地名地址信息': 13,
+            '道路': 12, '交通设施服务': 11, '购物服务': 10, '生活服务': 9, '餐饮服务': 8,
+            '通行设施': 12, '公共设施': 8, '科教文化服务': 7, '风景名胜': 6,
+            '乡镇': 12, '区县': 4, '城市': 2, '村庄': 13 };
+        const sourceRank = { '高德POI': 5, '百度POI': 4, '高德': 3, '高德提示': 2, '百度': 2,
+            'OSM': 1, '星图云': 2, '星图云POI': 2 };
+
+        allResults.sort((a, b) => {
+            const sa = (sourceRank[a.source] || 0) * 100 + (typeRank[a.level] || 0) * 3 +
+                (typeRank[a.type] || 0) * 2 + (a.addr && a.addr.length > 10 ? 5 : 0);
+            const sb = (sourceRank[b.source] || 0) * 100 + (typeRank[b.level] || 0) * 3 +
+                (typeRank[b.type] || 0) * 2 + (b.addr && b.addr.length > 10 ? 5 : 0);
             return sb - sa;
         });
 
-        const svcTag = usedServices.length ? ' | 来源: ' + usedServices.join(' + ') : '';
-        if (cityHint) document.getElementById('searchStatus').textContent = '搜索范围: ' + cityHint;
+        _searchCache = allResults;
+
+        // ==========================================================
+        // 渲染结果
+        // ==========================================================
+        const svcTag = ' | ' + usedServices.join(' + ');
+        const regionLabel = addr.region ? ' 范围:' + addr.region : '';
+        const kwLabel = addr.poiKeywords.length ? ' 关键词:' + addr.poiKeywords.slice(0,3).join('|') : '';
 
         if (!_searchCache.length) {
-            rd.innerHTML = '<div style="padding:14px;color:#8b949e;text-align:center">❌ 未找到结果' + svcTag +
-                '<br><small style="color:#484f58;line-height:1.8">已尝试：' + queries.map((x,i) => (i===0?'完整地址':'→ 降级') + '「' + x + '」').join('<br>') +
-                (cityHint ? '<br>限定范围: ' + cityHint : '') +
-                '<br><br>💡 尝试简化搜索词，如只搜"安国镇"</small></div>';
+            rd.innerHTML = '<div style="padding:14px;color:#8b949e;text-align:center">❌ 未找到结果' +
+                '<br><small style="color:#484f58;line-height:1.8">' +
+                '地址解析: ' + (addr.region || '(未识别)') + ' > ' + (addr.town || '?') + ' > ' + (addr.road || '?') +
+                '<br>POI关键词: ' + (addr.poiKeywords.join(', ') || '(无)') +
+                '<br><br>💡 建议:<br>1. 检查高德Key是否正确（Web服务类型）<br>' +
+                '2. 尝试只搜路名如"汉王路"<br>3. 尝试只搜镇名如"安国镇"</small></div>';
         } else {
-            const icons = { '高德': '🗺️', '高德提示': '💡', '百度': '🔍', 'OSM': '🌐', '星图云': '🛰️', '星图云POI': '🛰️' };
-            // 颜色标记精度
-            function levelColor(level) {
-                if (!level) return '#484f58';
-                if (/门牌号|POI|村庄/.test(level)) return '#3fb950';
-                if (/道路|乡镇/.test(level)) return '#d2991d';
+            const icons = { '高德POI': '📍', '百度POI': '📍', '高德': '🗺️', '高德提示': '💡', '百度': '🔍', 'OSM': '🌐' };
+            function colorFor(t) {
+                if (!t) return '#484f58';
+                if (/门牌号|商务住宅|公司企业|地名地址/.test(t)) return '#3fb950';
+                if (/道路|交通|村庄|乡镇/.test(t)) return '#d2991d';
                 return '#8b949e';
             }
             rd.innerHTML = _searchCache.map((r, i) =>
                 '<div class="item" onclick="selectResult(' + i + ')" style="display:flex;align-items:center;gap:8px">' +
-                '<span style="font-size:1.2em">' + (icons[r.source] || '📍') + '</span>' +
+                '<span style="font-size:1.1em">' + (icons[r.source] || '📍') + '</span>' +
                 '<div style="flex:1;min-width:0">' +
-                '<div style="color:#58a6ff;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(r.name) + '</div>' +
-                '<div style="font-size:0.8em;color:#8b949e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(r.addr || '') + '</div>' +
-                '<div style="font-size:0.72em">' +
-                '<span style="color:#484f58">' + r.lng.toFixed(6) + ', ' + r.lat.toFixed(6) + '</span>' +
-                '<span style="color:' + levelColor(r.level) + ';margin-left:6px">' + (r.level || r.source) + '</span>' +
-                (r.query !== q ? '<span style="color:#d2991d;margin-left:4px">模糊</span>' : '') +
-                '</div></div></div>'
+                '<div style="display:flex;align-items:center;gap:6px">' +
+                '<span style="color:#58a6ff;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(r.name) + '</span>' +
+                '<span style="font-size:0.65em;color:' + colorFor(r.level||r.type) + ';background:' + colorFor(r.level||r.type) + '22;padding:1px 5px;border-radius:3px;white-space:nowrap">' + escHtml(r.level || r.type || r.source) + '</span>' +
+                '</div>' +
+                (r.addr ? '<div style="font-size:0.78em;color:#8b949e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(r.addr) + '</div>' : '') +
+                '<div style="font-size:0.7em;color:#484f58">' + r.lng.toFixed(6) + ', ' + r.lat.toFixed(6) + ' (WGS-84) | ' + r.source + '</div>' +
+                '</div></div>'
             ).join('');
-            document.getElementById('searchStatus').textContent = '找到 ' + _searchCache.length + ' 个结果' + svcTag;
+            document.getElementById('searchStatus').textContent = '✓ ' + _searchCache.length + '个结果' + regionLabel + kwLabel;
         }
     } catch (e) {
         rd.innerHTML = '<div style="padding:12px;color:#ff7b72;text-align:center">网络错误: ' + escHtml(e.message) + '</div>';
