@@ -76,9 +76,9 @@ td .cell-input.num{width:70px;text-align:right}
 .actions-cell button:hover{background:#30363d}
 
 /* Section */
-.section-title{font-size:0.9em;color:#d2a8ff;margin:16px 0 10px;padding-bottom:6px;border-bottom:1px solid #21262d;display:flex;align-items:center;gap:8px}
+.section-title{font-size:0.9em;color:#d2a8ff;margin:16px 0 10px;padding-bottom:6px;border-bottom:1px solid #21262d;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .section-title .badge{font-size:0.75em;background:#7c3aed;color:#fff;padding:2px 8px;border-radius:10px}
-.section-actions{display:flex;gap:6px;margin-left:auto}
+.section-actions{display:flex;gap:4px;margin-left:auto;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
 
 /* Toast */
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;padding:10px 24px;border-radius:8px;font-size:0.85em;z-index:99999;opacity:0;transition:opacity 0.3s;pointer-events:none}
