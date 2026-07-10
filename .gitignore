@@ -3,3 +3,11 @@ node_modules/
 .DS_Store
 Thumbs.db
 *.log
+
+# 敏感数据 — 禁止推送
+_excel_info.json
+_ocr_result.txt
+_temp.jpg
+_temp.png
+疑点明细/
+高德key/
