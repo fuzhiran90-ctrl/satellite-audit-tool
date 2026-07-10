@@ -222,6 +222,11 @@ let currentPage = 0;      // 疑点清单当前分页
 const PAGE_SIZE = 100;    // 每页显示条数
 let _saveTimer = null;    // 防抖保存定时器
 let _selectedRows = new Set(); // 勾选中的行索引
+let findingSearchText = '';    // 疑点检索文本
+let _searchTimer = null;       // 检索防抖定时器
+let _imeBusy = false;          // 拼音输入法组字中
+function imeBegin() { _imeBusy = true; if (_searchTimer) { clearTimeout(_searchTimer); _searchTimer = null; } }
+function imeDone() { _imeBusy = false; onFindingSearch(); }
 
 // ===================================================================
 //  Init
@@ -306,6 +311,7 @@ function selectModel(id) {
     selectedModelId = id;
     currentPage = 0;
     editingFindingIdx = -1;
+    findingSearchText = '';
     renderModelList();
     renderContent();
 }
@@ -372,22 +378,52 @@ function renderContent() {
         }
         html += '</div></div>';
 
+        // 检索框
+        html += '<div style="margin:8px 0 4px"><input id="findingSearchInput" type="text" placeholder="🔍 实时检索疑点 — 户名/地址/编号…" value="' + escHtml(findingSearchText) + '" style="width:100%;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:7px 10px;border-radius:6px;font-size:0.82em" oninput="onFindingSearch()" oncompositionstart="imeBegin()" oncompositionend="imeDone()"><div id="findingSearchInfo"></div></div>';
+
         if (findings.length === 0) {
             html += '<div style="text-align:center;padding:40px;color:#484f58">暂无疑点数据<br><button class="btn-primary" style="margin-top:12px" onclick="addFinding()">＋ 添加第一条疑点</button></div>';
         } else {
+            // ★ 检索过滤
+            const ft = findingSearchText.trim().toLowerCase();
+            let filteredFindings = findings;
+            let origIndexMap = []; // filteredIndex → originalIndex
+            let searchInfoHtml = '';
+            if (ft) {
+                for (let i = 0; i < findings.length; i++) {
+                    const f = findings[i];
+                    const haystack = [
+                        f.id || '', f.name || '', f.addr || '', f.userName || '',
+                        f.gridDate || '', String(f.capacity || ''), String(f.monthlyHours || ''),
+                        f.lng != null ? String(f.lng) : '',
+                        f.lat != null ? String(f.lat) : ''
+                    ].join(' ').toLowerCase();
+                    if (haystack.includes(ft)) {
+                        origIndexMap.push(i);
+                    }
+                }
+                filteredFindings = origIndexMap.map(i => findings[i]);
+                searchInfoHtml = '<div style="color:#d2991d;font-size:0.7em;margin-top:2px">🔍 检索「' + escHtml(ft) + '」— 匹配 ' + filteredFindings.length + ' 条（共 ' + findings.length + ' 条）</div>';
+                // 重置页码
+                if (currentPage >= Math.ceil(filteredFindings.length / PAGE_SIZE)) currentPage = 0;
+            }
+
+            // 注入检索结果信息到占位div
+            html = html.replace('<div id="findingSearchInfo"></div>', '<div id="findingSearchInfo">' + searchInfoHtml + '</div>');
+
             // ★ 分页: 只渲染当前页数据，3000+条也不会卡
-            const totalPages = Math.ceil(findings.length / PAGE_SIZE);
+            const totalPages = Math.ceil(filteredFindings.length / PAGE_SIZE);
             if (currentPage >= totalPages) currentPage = totalPages - 1;
             if (currentPage < 0) currentPage = 0;
             const startIdx = currentPage * PAGE_SIZE;
-            const endIdx = Math.min(startIdx + PAGE_SIZE, findings.length);
-            const pageFindings = findings.slice(startIdx, endIdx);
+            const endIdx = Math.min(startIdx + PAGE_SIZE, filteredFindings.length);
+            const pageFindings = filteredFindings.slice(startIdx, endIdx);
 
             // ★ 构建表头HTML（用于真实thead和悬浮克隆）
             const cols = buildColumns(findings);
             const mForLabel = models.find(x => x.id === selectedModelId);
             let theadHtml = '<tr>';
-            theadHtml += '<th class="sticky-chk"><input type="checkbox" id="selectAllCb" onclick="toggleSelectAll()" style="cursor:pointer;accent-color:#7c3aed" ' + (pageFindings.every((f, pi) => _selectedRows.has(startIdx + pi)) ? 'checked' : '') + '></th>';
+            theadHtml += '<th class="sticky-chk"><input type="checkbox" id="selectAllCb" onclick="toggleSelectAll()" style="cursor:pointer;accent-color:#7c3aed" ' + (pageFindings.every((f, pi) => _selectedRows.has(ft ? origIndexMap[startIdx + pi] : (startIdx + pi))) ? 'checked' : '') + '></th>';
             theadHtml += '<th class="sticky-num">#</th>';
             cols.forEach(col => { theadHtml += '<th>' + escHtml(colLabel(col, mForLabel)) + '</th>'; });
             theadHtml += '<th style="width:80px">操作</th>';
@@ -400,21 +436,21 @@ function renderContent() {
 
             for (let pi = 0; pi < pageFindings.length; pi++) {
                 const f = pageFindings[pi];
-                const i = startIdx + pi;
-                const checked = _selectedRows.has(i);
-                html += '<tr id="findingRow-' + i + '" class="' + (editingFindingIdx === i ? 'selected' : '') + (checked ? 'selected' : '') + '">';
-                html += '<td class="sticky-chk"><input type="checkbox" ' + (checked ? 'checked' : '') + ' onclick="toggleRow(' + i + ')" style="cursor:pointer;accent-color:#7c3aed"></td>';
-                html += '<td class="sticky-num" style="color:#484f58">' + (i + 1) + '</td>';
+                const origIdx = ft ? origIndexMap[startIdx + pi] : (startIdx + pi);
+                const checked = _selectedRows.has(origIdx);
+                html += '<tr id="findingRow-' + origIdx + '" class="' + (editingFindingIdx === origIdx ? 'selected' : '') + (checked ? 'selected' : '') + '">';
+                html += '<td class="sticky-chk"><input type="checkbox" ' + (checked ? 'checked' : '') + ' onclick="toggleRow(' + origIdx + ')" style="cursor:pointer;accent-color:#7c3aed"></td>';
+                html += '<td class="sticky-num" style="color:#484f58">' + (origIdx + 1) + '</td>';
                 cols.forEach(col => {
                     const val = f[col] != null ? f[col] : '';
-                    html += '<td><input class="cell-input' + (typeof val === 'number' ? ' num' : '') + '" value="' + escHtml(String(val)) + '" onchange="onFindingCellChange(' + i + ',\'' + col + '\',this.value)" data-col="' + col + '" data-row="' + i + '"></td>';
+                    html += '<td><input class="cell-input' + (typeof val === 'number' ? ' num' : '') + '" value="' + escHtml(String(val)) + '" onchange="onFindingCellChange(' + origIdx + ',\'' + col + '\',this.value)" data-col="' + col + '" data-row="' + origIdx + '"></td>';
                 });
                 html += '<td class="actions-cell">';
                 const attCount = (Array.isArray(f.attachments) ? f.attachments.length : 0);
-                const attIcon = attCount > 0 ? '<span title="' + attCount + '个附件" style="cursor:pointer;margin-right:4px" onclick="editFindingRow(' + i + ')">📎' + attCount + '</span>' : '';
+                const attIcon = attCount > 0 ? '<span title="' + attCount + '个附件" style="cursor:pointer;margin-right:4px" onclick="editFindingRow(' + origIdx + ')">📎' + attCount + '</span>' : '';
                 html += attIcon;
-                html += '<button onclick="editFindingRow(' + i + ')" title="编辑整行">✏️</button>';
-                html += '<button class="danger" onclick="deleteFinding(' + i + ')" title="删除">🗑</button>';
+                html += '<button onclick="editFindingRow(' + origIdx + ')" title="编辑整行">✏️</button>';
+                html += '<button class="danger" onclick="deleteFinding(' + origIdx + ')" title="删除">🗑</button>';
                 html += '</td></tr>';
             }
             html += '</tbody></table></div>';
@@ -438,7 +474,7 @@ function renderContent() {
 
                 html += '<button class="btn-normal" style="padding:4px 10px;font-size:0.72em" onclick="goPage(' + (currentPage + 1) + ')" ' + (currentPage >= totalPages - 1 ? 'disabled' : '') + '>下一页 ▶</button>';
                 html += '<button class="btn-normal" style="padding:4px 10px;font-size:0.72em" onclick="goPage(' + (totalPages - 1) + ')" ' + (currentPage >= totalPages - 1 ? 'disabled' : '') + '>末页 ⏭</button>';
-                html += '<span style="color:#8b949e;font-size:0.7em;margin-left:4px">' + (currentPage + 1) + '/' + totalPages + ' 页 | ' + findings.length + ' 条</span>';
+                html += '<span style="color:#8b949e;font-size:0.7em;margin-left:4px">' + (currentPage + 1) + '/' + totalPages + ' 页 | ' + (ft ? filteredFindings.length + '/' + findings.length : findings.length + '') + ' 条</span>';
                 html += '</div>';
             }
         }
@@ -452,7 +488,21 @@ function switchTab(tab) {
     activeTab = tab;
     currentPage = 0;
     editingFindingIdx = -1;
+    findingSearchText = '';
     renderContent();
+}
+
+function onFindingSearch() {
+    // 拼音组字中跳过（compositionstart→compositionend 之间），等汉字上屏后 imeDone() 再触发
+    if (_imeBusy) return;
+    findingSearchText = document.getElementById('findingSearchInput').value;
+    // 防抖：300ms 内无新输入才执行渲染
+    if (_searchTimer) clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+        currentPage = 0;
+        renderContent();
+        _searchTimer = null;
+    }, 300);
 }
 
 // ===================================================================
@@ -644,27 +694,33 @@ function goPage(pg) {
 function toggleRow(i) {
     if (_selectedRows.has(i)) _selectedRows.delete(i);
     else _selectedRows.add(i);
+    const row = document.getElementById('findingRow-' + i);
+    if (row) row.classList.toggle('selected', _selectedRows.has(i));
     refreshSelectBtn();
 }
 
 // 全选/取消本页（不重建页面）
 function toggleSelectAll() {
     const findings = findingsMap[selectedModelId] || [];
-    const startIdx = currentPage * PAGE_SIZE;
-    const endIdx = Math.min(startIdx + PAGE_SIZE, findings.length);
-    const allChecked = Array.from({ length: endIdx - startIdx }, (_, pi) => startIdx + pi).every(i => _selectedRows.has(i));
+    // 获取当前页所有可见的复选框（它们使用原始索引）
+    const cbs = document.querySelectorAll('#contentArea input[type=checkbox][onclick*="toggleRow("]');
+    const visibleIndices = Array.from(cbs).map(cb => parseInt(cb.getAttribute('onclick').match(/toggleRow\((\d+)\)/)[1]));
+    const allChecked = visibleIndices.every(i => _selectedRows.has(i));
     if (allChecked) {
-        for (let i = startIdx; i < endIdx; i++) _selectedRows.delete(i);
-        document.getElementById('selectAllCb').checked = false;
+        visibleIndices.forEach(i => _selectedRows.delete(i));
     } else {
-        for (let i = startIdx; i < endIdx; i++) _selectedRows.add(i);
-        document.getElementById('selectAllCb').checked = true;
+        visibleIndices.forEach(i => _selectedRows.add(i));
     }
-    // 同步更新当前页所有checkbox
-    for (let i = startIdx; i < endIdx; i++) {
-        const cb = document.querySelector('input[type=checkbox][onclick*="toggleRow(' + i + ')"]');
-        if (cb) cb.checked = _selectedRows.has(i);
-    }
+    cbs.forEach(cb => {
+        const i = parseInt(cb.getAttribute('onclick').match(/toggleRow\((\d+)\)/)[1]);
+        cb.checked = _selectedRows.has(i);
+    });
+    document.getElementById('selectAllCb').checked = !allChecked;
+    // 更新行样式
+    visibleIndices.forEach(i => {
+        const row = document.getElementById('findingRow-' + i);
+        if (row) row.classList.toggle('selected', _selectedRows.has(i));
+    });
     refreshSelectBtn();
 }
 
